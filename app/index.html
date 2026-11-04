@@ -194,7 +194,7 @@ td{font-family:var(--f-data)}
 (function(){
 "use strict";
 var CFG_KEY="fc-sync", API="https://api.github.com";
-var BUILD="2026-11-04 16:55";
+var BUILD="2026-11-04 17:30";
 var $=function(s){return document.querySelector(s)};
 var D={rules:null,snap:null,weekly:null,state:null,stateSha:null,err:null};
 
@@ -391,14 +391,14 @@ function renderSpar(){
   var W=460,H=190,L=44,B=24,T=10;
   var max=Math.max.apply(null,[4000].concat(show.map(function(r){return r.ueberschuss||0}),show.map(function(r){return soll[r.monat]||0})));
   var bw=(W-L-8)/show.length,sy=function(v){return T+(H-T-B)*(1-v/max)};
-  var scrub=scrubAttr(show.map(function(r,i){var x=L+i*bw+bw*0.5,s=soll[r.monat],u=r.ueberschuss,ok=s==null||u>=s;
-    return {x:x,y:[u!=null?sy(Math.max(0,u)):null,s!=null?sy(s):null],c:[ok?"var(--accent)":"var(--warn)","var(--ink)"],
+  var scrub=scrubAttr(show.map(function(r,i){var x=L+i*bw+bw*0.5,s=soll[r.monat],u=r.ueberschuss,ok=s!=null&&u>=s;
+    return {x:x,y:[u!=null?sy(Math.max(0,u)):null,s!=null?sy(s):null],c:[s==null?"var(--muted)":ok?"var(--accent)":"var(--warn)","var(--ink)"],
       v:u!=null?eur(u,2):"Soll "+eur(s,2),
       t:r.monat+(u!=null?(s!=null?" · Soll "+eur(s,2):"")+(r.sparquote!=null?" · "+r.sparquote.toLocaleString("de-DE")+" %":""):" · noch kein Ist")}}));
   var g='<svg viewBox="0 0 '+W+' '+H+'" width="100%" role="img" aria-label="Überschuss pro Monat gegen Soll"'+scrub+'>';
   for(var t=0;t<=max;t+=1000)g+='<line x1="'+L+'" x2="'+(W-4)+'" y1="'+sy(t)+'" y2="'+sy(t)+'" stroke="var(--line)"/><text x="'+(L-6)+'" y="'+(sy(t)+4)+'" text-anchor="end">'+(t/1000)+'k</text>';
   show.forEach(function(r,i){var x=L+i*bw+bw*0.18,w=bw*0.64,s=soll[r.monat];
-    if(r.ueberschuss!=null){var v=Math.max(0,r.ueberschuss),ok=s==null||r.ueberschuss>=s;g+='<rect x="'+x+'" y="'+sy(v)+'" width="'+w+'" height="'+(sy(0)-sy(v))+'" rx="3" fill="'+(ok?"var(--accent)":"var(--warn)")+'"/>'}
+    if(r.ueberschuss!=null){var v=Math.max(0,r.ueberschuss),ok=s!=null&&r.ueberschuss>=s;g+='<rect x="'+x+'" y="'+sy(v)+'" width="'+w+'" height="'+(sy(0)-sy(v))+'" rx="3" fill="'+(s==null?"var(--muted)":ok?"var(--accent)":"var(--warn)")+'"/>'}
     if(s!=null)g+='<line x1="'+(x-3)+'" x2="'+(x+w+3)+'" y1="'+sy(s)+'" y2="'+sy(s)+'" stroke="var(--ink)" stroke-width="2" stroke-dasharray="'+(r.ueberschuss==null?"4 3":"0")+'"/>';
     g+='<text x="'+(x+w/2)+'" y="'+(H-6)+'" text-anchor="middle">'+r.monat.slice(0,3)+'</text>'});
   g+="</svg>";
@@ -407,7 +407,7 @@ function renderSpar(){
   var last=rows.slice().reverse().find(function(r){return r.ueberschuss!=null});
   var next=rows.find(function(r){return r.ueberschuss==null&&soll[r.monat]!=null});
   el.innerHTML='<div class="chart">'+g+'</div>'+
-  '<div class="legend"><span><i style="background:var(--accent)"></i>Ist ≥ Soll</span><span><i style="background:var(--warn)"></i>Ist &lt; Soll</span><span><i style="background:var(--ink);height:2px"></i>Soll (gestrichelt: noch kein Ist)</span></div>'+
+  '<div class="legend"><span><i style="background:var(--accent)"></i>Ist ≥ Soll</span><span><i style="background:var(--warn)"></i>Ist &lt; Soll</span><span><i style="background:var(--muted)"></i>vor Okt 2026, kein Soll</span><span><i style="background:var(--ink);height:2px"></i>Soll (gestrichelt: noch kein Ist)</span></div>'+
   '<dl class="kv"><dt>Letzter Ist-Monat</dt><dd>'+(last?last.monat+": "+eur(last.ueberschuss)+" · "+(last.sparquote!=null?last.sparquote.toLocaleString("de-DE")+" %":"–"):"–")+'</dd>'+
   (last&&last.investiert!=null&&last.netto?'<dt>Davon tatsächlich angelegt</dt><dd>'+eur(last.investiert)+' · '+pct(last.investiert/last.netto)+'</dd>'+
    '<dt>Lücke Überschuss − angelegt</dt><dd>'+eur(last.ueberschuss-last.investiert)+' <small>(Einrichtung, Vorschüsse)</small></dd>':'')+
@@ -432,7 +432,7 @@ function renderGem(){
   '<dt>Bedarf / Monat</dt><dd>'+eur(bed)+(hi>lo?' <small>Spanne '+eur(bLo)+'–'+eur(bHi)+'</small>':'')+'</dd>'+
   '<dt>· Fixkosten</dt><dd>'+eur(fix)+'</dd><dt>· Alltag Ø</dt><dd>'+eur(all)+'</dd><dt>· Urlaub '+(ub?'Budget':'Ø')+'</dt><dd>'+eur(url)+(ub?' <small>('+eur(g.urlaubBudgetJahr)+'/Jahr)</small>':'')+'</dd>'+
   '<dt>'+(gap>0?"Lücke / Monat":"Überdeckung")+'</dt><dd>'+eur(Math.abs(gap))+'</dd>'+
-  '<dt>Deckend je Person</dt><dd>'+eur(emp)+(hi>lo&&r50(bLo)!==r50(bHi)?' <small>Spanne '+eur(r50(bLo))+'–'+eur(r50(bHi))+'</small>':'')+'</dd></dl>'+
+  '<dt>Nötige Einzahlung je Person</dt><dd>'+eur(emp)+(hi>lo&&r50(bLo)!==r50(bHi)?' <small>Spanne '+eur(r50(bLo))+'–'+eur(r50(bHi))+'</small>':'')+'</dd></dl>'+
   '<div class="chart"><table><thead><tr><th>Monat</th><th>Alltag</th><th>Urlaub</th><th>Einrichtung</th></tr></thead><tbody>'+rows+'</tbody></table></div>'+
   '<p class="foot">'+(vorl?'<span class="pill warn">vorläufig</span> ':'')+'Alltag aus '+n+' Monat'+(n===1?'':'en')+(sonder.length?', ohne Sondermonat '+sonder.join(", "):'')+'. '+(vorl?'Ab 3 Monaten belastbar. ':'')+(ub&&g.urlaubHinweis?'Urlaub: '+esc(g.urlaubHinweis)+'. ':'')+'Einrichtung zählt nicht zum Bedarf.</p>';
 }
