@@ -171,7 +171,7 @@ td{font-family:var(--f-data)}
       <h2 class="ghead">Positionen</h2>
       <div class="grid">
         <section class="panel" id="p-nio"><h3>NIO-Verkaufsleiter <small>Kurs in USD, log. Skala</small></h3><div class="body"></div></section>
-        <section class="panel" id="p-week"><h3>NIO-Wochenschlüsse <small>Stufe-0-Prüfung</small></h3><div class="body"></div></section>
+        <section class="panel" id="p-week"><h3>NIO-Wochenschlüsse <small>Z0 &amp; Upside-Trigger</small></h3><div class="body"></div></section>
         <section class="panel" id="p-baba"><h3>BABA-Leiter <small>Kurs in EUR</small></h3><div class="body"></div></section>
       </div>
     </section>
@@ -310,11 +310,14 @@ function renderStatus(d){
   if(p==null)out.push(chip("Liquiditätsregel","–","Puffer unter Liquidität eintragen.","","","#p-puffer"));
   else{var act=p<R.liquiditaet.pufferMin;
     out.push(chip("Liquiditätsregel",eur(p),act?"Unter "+eur(R.liquiditaet.pufferMin)+": keine Einzelaktien-Zukäufe. ETF-Sparplan läuft weiter. Es fehlen "+eur(R.liquiditaet.pufferMin-p)+".":"Über "+eur(R.liquiditaet.pufferMin)+": Zukäufe regelkonform möglich.",act?"warn":"ok",act?'<span class="pill warn">aktiv</span>':'<span class="pill ok">inaktiv</span>',"#p-puffer"))}
-  var dec=R.termine.find(function(t){return t.art==="entscheidung"});
-  var s0=stufe0(),dd=dec?days(new Date(dec.datum+"T11:00:00+02:00")):null;
-  var s0note=R.nio.stufe0.status+". "+(dec&&dd>=0?"Entscheidung "+dDE(dec.datum)+", noch "+dd+" "+(dd===1?"Tag":"Tage")+".":"Entscheidungstermin vorbei. Regelwerk nachziehen.");
-  if(s0.weeks.length) s0note+=s0.both?" Letzte zwei Wochenschlüsse weiter unter $4,38.":" Letzter Wochenschluss nicht mehr unter beiden Schwellen.";
-  out.push(chip("NIO Stufe 0",d?usd(d.nio.kursEur*d.fx):"–",s0note,"crit",'<span class="pill crit">offen</span>',"#p-nio"));
+  var s0=stufe0(),z0=R.nio.stufe0.z0Datum,zd=z0?days(new Date(z0+"T15:30:00+02:00")):null,up=R.nio.upsideUsd;
+  var upHit=s0.weeks.some(function(w){return w.closeUsd>up&&w.datum>"2026-11-04"&&(!z0||w.datum<=z0)});
+  var zs,zp,zn;
+  if(!z0){zs="crit";zp='<span class="pill crit">offen</span>';zn=R.nio.stufe0.status+". Kein Z0-Termin in rules.json."}
+  else if(upHit){zs="ok";zp='<span class="pill ok">entfällt</span>';zn="Wochenschluss über $"+up.toFixed(2).replace(".",",")+" erreicht: Upside-Trigger, Z0 entfällt."}
+  else if(zd<=0){zs="crit";zp='<span class="pill crit">fällig</span>';zn="Z0 fällig: "+R.nio.stufe0.stueck.toLocaleString("de-DE")+" Stück verkaufen, kursunabhängig."}
+  else{zs="warn";zp='<span class="pill warn">terminiert</span>';zn="Pflichtverkauf "+R.nio.stufe0.stueck.toLocaleString("de-DE")+" Stück am "+dDE(z0)+", noch "+zd+" "+(zd===1?"Tag":"Tage")+". Entfällt nur bei Schluss über $"+up.toFixed(2).replace(".",",")+". K1/K3 lösen früher aus."}
+  out.push(chip("NIO Z0",d?usd(d.nio.kursEur*d.fx):"–",zn,zs,zp,"#p-nio"));
   if(d){var over=d.china>R.chinaAdrMax;
     out.push(chip("China-ADR-Anteil",pct(d.china),"NIO + BABA, Grenze "+pct(R.chinaAdrMax,0)+". "+(over?"TOR 3 rot, kein BABA-Nachkauf.":"Unter der Grenze."),over?"warn":"ok",over?'<span class="pill warn">über Grenze</span>':'<span class="pill ok">im Rahmen</span>',"#p-alloc"));
     out.push(chip("Spekulativer Anteil",pct(d.spec),"NIO, BABA, GRAB, Krypto. Der 7-%-Pfad unterstellt einen breiten Markt.",d.spec>0.4?"warn":"ok","","#p-alloc"))}
@@ -339,23 +342,23 @@ function ladderSvg(points,cur,min,max,log,fmt){
 function renderNio(d){
   var el=body("#p-nio");if(!d||!d.nio){el.innerHTML='<div class="empty">Keine NIO-Position im Snapshot.</div>';return}
   var N=D.rules.nio,n=d.nio,fx=d.fx,cur=n.kursEur*fx;
-  var pts=[{v:N.stufe0.triggerUsd,l:"Stufe 0",c:"var(--crit)"},{v:N.upsideUsd,l:"Upside",c:"var(--ok)"}].concat(N.stufen.map(function(s){return {v:s.eur*fx,l:s.name,c:"var(--muted)"}}));
+  var pts=[{v:N.stufe0.triggerUsd,l:"Stufe 0 (alt)",c:"var(--muted)"},{v:N.upsideUsd,l:"Upside",c:"var(--ok)"}].concat(N.stufen.map(function(s){return {v:s.eur*fx,l:s.name,c:"var(--muted)"}}));
   var e=N.schaetzung2030Usd;
   el.innerHTML='<div class="chart">'+ladderSvg(pts,cur,2.5,20,true,function(v){return "$"+v.toFixed(2).replace(".",",")})+'</div>'+
   '<dl class="kv"><dt>Bestand</dt><dd>'+n.stueck.toLocaleString("de-DE")+' Stück · '+eur(n.wertEur)+'</dd>'+
   '<dt>Kurs EUR / USD</dt><dd>'+eur(n.kursEur,2)+' / '+usd(cur)+'</dd>'+
-  '<dt>Abstand zu Stufe 0</dt><dd>'+pct(cur/N.stufe0.triggerUsd-1)+'</dd>'+
+  '<dt>Z0 Pflichtverkauf</dt><dd>'+(N.stufe0.z0Datum?dDE(N.stufe0.z0Datum)+' · noch '+Math.max(0,days(new Date(N.stufe0.z0Datum+"T15:30:00+02:00")))+' Tage':'–')+'</dd>'+
   '<dt>Bis Upside-Trigger</dt><dd>+'+pct(N.upsideUsd/cur-1)+'</dd>'+
-  '<dt>Stufe 0 fällig</dt><dd>'+N.stufe0.stueck.toLocaleString("de-DE")+' Stück ≈ '+eur(N.stufe0.stueck*n.kursEur)+'</dd>'+
+  '<dt>Z0 Volumen</dt><dd>'+N.stufe0.stueck.toLocaleString("de-DE")+' Stück ≈ '+eur(N.stufe0.stueck*n.kursEur)+' (heute)</dd>'+
   '<dt>Schätzung 2030 Bear / Base / Bull</dt><dd>'+usd(e.bear)+' / '+usd(e.base)+' / '+usd(e.bull)+'</dd></dl>';
 }
 function renderWeek(){
   var el=body("#p-week"),s0=stufe0(),t=D.rules.nio.stufe0.triggerUsd,up=D.rules.nio.upsideUsd;
   if(!s0.weeks.length){el.innerHTML='<div class="empty">Noch keine Wochenschlüsse erfasst. Der geplante Task trägt sie samstags früh nach US-Börsenschluss ein.</div>';return}
-  var rows=s0.weeks.slice(-8).reverse().map(function(w){var st=w.closeUsd<t?'<span class="pill crit">unter $4,38</span>':w.closeUsd>up?'<span class="pill ok">über $6,32</span>':'<span class="pill warn">dazwischen</span>';
+  var rows=s0.weeks.slice(-8).reverse().map(function(w){var st=w.closeUsd>up?'<span class="pill ok">über $6,32</span>':'<span class="pill warn">unter $6,32</span>';
     return '<tr><td>'+dDE(w.datum)+'</td><td>'+usd(w.closeUsd)+'</td><td>'+st+'</td></tr>'}).join("");
   el.innerHTML='<div class="chart"><table><thead><tr><th>Woche bis</th><th>Schluss</th><th>Status</th></tr></thead><tbody>'+rows+'</tbody></table></div>'+
-  '<p class="foot">'+(s0.both?"Regel erfüllt: zwei Wochenschlüsse in Folge unter $4,38.":"Regel aktuell nicht erfüllt.")+'</p>';
+  '<p class="foot">'+(s0.weeks.some(function(w){return w.closeUsd>up&&w.datum>"2026-11-04"})?"Upside-Trigger erreicht: Z0 entfällt.":"Upside-Trigger nicht erreicht. Z0 ("+(D.rules.nio.stufe0.z0Datum?dDE(D.rules.nio.stufe0.z0Datum):"–")+") bleibt bestehen.")+'</p>';
 }
 function renderAlloc(d){
   var el=body("#p-alloc");if(!d){el.innerHTML='<div class="empty">Kein Snapshot.</div>';return}
