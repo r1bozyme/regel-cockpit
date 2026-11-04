@@ -414,18 +414,18 @@ function renderGem(){
   var el=body("#p-gem"),g=D.state&&D.state.gemeinschaftskonto;
   if(!g){el.innerHTML='<div class="empty">Noch keine Daten. Werden im Monatsreview eingetragen.</div>';return}
   var m=g.monate||[],avg=function(k){return m.length?m.reduce(function(a,x){return a+(x[k]||0)},0)/m.length:0};
-  var fix=g.fixMonat||0,all=avg("alltag"),url=avg("urlaub"),bed=fix+all+url,ein=(g.einzahlungJePerson||0)*2,gap=bed-ein;
+  var fix=g.fixMonat||0,all=avg("alltag"),ub=g.urlaubBudgetJahr!=null,url=ub?g.urlaubBudgetJahr/12:avg("urlaub"),bed=fix+all+url,ein=(g.einzahlungJePerson||0)*2,gap=bed-ein;
   var emp=Math.ceil(bed/2/50)*50,scale=Math.max(bed,ein)*1.1;
   var rows=m.slice(-6).map(function(x){return '<tr><td>'+esc(x.monat)+'</td><td>'+eur(x.alltag)+'</td><td>'+eur(x.urlaub)+'</td><td>'+eur(x.einrichtung||0)+'</td></tr>'}).join("");
   el.innerHTML='<div class="meter" role="img" aria-label="Einzahlung gegen Bedarf"><span style="width:'+Math.min(100,ein/scale*100)+'%;background:'+(gap>0?"var(--warn)":"var(--ok)")+'"></span><i style="left:'+(bed/scale*100)+'%"></i></div>'+
   '<dl class="kv"><dt>Kontostand</dt><dd>'+eur(g.wert)+' <small>Stand '+dDE(g.geaendert)+'</small></dd>'+
   '<dt>Einzahlung</dt><dd>'+eur(ein)+' <small>(2 × '+eur(g.einzahlungJePerson)+')</small></dd>'+
   '<dt>Bedarf / Monat</dt><dd>'+eur(bed)+'</dd>'+
-  '<dt>· Fixkosten</dt><dd>'+eur(fix)+'</dd><dt>· Alltag Ø</dt><dd>'+eur(all)+'</dd><dt>· Urlaub Ø</dt><dd>'+eur(url)+'</dd>'+
+  '<dt>· Fixkosten</dt><dd>'+eur(fix)+'</dd><dt>· Alltag Ø</dt><dd>'+eur(all)+'</dd><dt>· Urlaub '+(ub?'Budget':'Ø')+'</dt><dd>'+eur(url)+(ub?' <small>('+eur(g.urlaubBudgetJahr)+'/Jahr)</small>':'')+'</dd>'+
   '<dt>'+(gap>0?"Lücke / Monat":"Überdeckung")+'</dt><dd>'+eur(Math.abs(gap))+'</dd>'+
   '<dt>Deckend je Person</dt><dd>'+eur(emp)+'</dd></dl>'+
   '<div class="chart"><table><thead><tr><th>Monat</th><th>Alltag</th><th>Urlaub</th><th>Einrichtung</th></tr></thead><tbody>'+rows+'</tbody></table></div>'+
-  '<p class="foot">Ø über '+m.length+' Monat'+(m.length===1?'':'e')+'. Einrichtung zählt nicht zum Bedarf (läuft bis März separat).</p>';
+  '<p class="foot">Alltag Ø über '+m.length+' Monat'+(m.length===1?'':'e')+(ub&&g.urlaubHinweis?'. Urlaub: '+esc(g.urlaubHinweis):'')+'. Einrichtung zählt nicht zum Bedarf (läuft bis März separat).</p>';
 }
 /* Monatsweise Simulation bis zum Ziel: Wert * (1+r) + Sparrate */
 function simulate(v0,rate,start,goal,ret){
