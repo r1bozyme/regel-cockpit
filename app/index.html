@@ -59,7 +59,7 @@ button:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline
 .panel{scroll-margin-top:calc(env(safe-area-inset-top,0px) + 64px);background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:16px 18px;display:grid;gap:12px;min-width:0;align-content:start}
 .panel h2,.panel h3{font-size:1rem;font-weight:700;margin:0;display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:space-between}
 .panel h2 small,.panel h3 small{font-weight:500;color:var(--muted);font-size:.78rem}
-#main{display:grid;gap:28px}
+#main{display:grid;gap:28px;overflow-x:clip}
 .group{display:grid;gap:12px;scroll-margin-top:calc(env(safe-area-inset-top,0px) + 64px)}
 .ghead{font-size:.75rem;text-transform:uppercase;letter-spacing:.1em;color:var(--muted);font-weight:800;margin:0;display:flex;align-items:center;gap:10px}
 .ghead::after{content:"";flex:1;height:1px;background:var(--line)}
@@ -208,7 +208,7 @@ td{font-family:var(--f-data)}
 (function(){
 "use strict";
 var CFG_KEY="fc-sync", API="https://api.github.com";
-var BUILD="2026-11-05 07:30";
+var BUILD="2026-11-05 07:50";
 var $=function(s){return document.querySelector(s)};
 var D={rules:null,snap:null,weekly:null,state:null,stateSha:null,err:null};
 
@@ -597,18 +597,38 @@ document.addEventListener("click",function(e){
 (function(){var h=location.hash.slice(1),saved=null;try{saved=localStorage.getItem(TAB_KEY)}catch(e){}
   var el=h&&document.getElementById(h),g=el&&(el.classList.contains("group")?el:el.closest(".group"));
   showTab(g?g.id:(saved||"g-status"),g&&g!==el?h:null)})();
-/* ─── Wischen: links/rechts wechselt den Reiter ─── */
+/* ─── Wischen wie unter Android: Seite folgt dem Finger, rastet ein oder federt zurück.
+   Überall möglich, auch auf Diagrammen: Bewegt sich der Finger in den ersten 200 ms waagerecht,
+   ist es ein Seitenwechsel. Bleibt er 200 ms ruhig, übernimmt das Diagramm (Gedrückthalten, scrub.js). ─── */
 (function(){
-  var sx=0,sy=0,st=0,ok=false,m=document.getElementById("main");if(!m)return;
+  var m=document.getElementById("main");if(!m)return;
+  var HOLD=200,LOCK=10,s0=null;
+  function hScroll(el){for(;el&&el!==m;el=el.parentElement){if(el.scrollWidth>el.clientWidth+2&&/(auto|scroll)/.test(getComputedStyle(el).overflowX))return true}return false}
+  function cur(){return document.getElementById(curTab)}
   m.addEventListener("touchstart",function(e){
+    if(e.touches.length!==1){s0=null;return}
     var t=e.touches[0],el=e.target;
-    ok=e.touches.length===1&&!(el.closest&&el.closest(".jump,svg,.chart,input,button,.seg,.alloc,.meter"));
-    sx=t.clientX;sy=t.clientY;st=Date.now()},{passive:true});
-  m.addEventListener("touchend",function(e){
-    if(!ok)return;ok=false;var t=e.changedTouches[0],dx=t.clientX-sx,dy=t.clientY-sy;
-    if(Math.abs(dx)<60||Math.abs(dx)<1.6*Math.abs(dy)||Date.now()-st>700)return;
-    var ids=groupsAll().map(function(g){return g.id}),i=ids.indexOf(curTab),n=i+(dx<0?1:-1);
-    if(n<0||n>=ids.length)return;showTab(ids[n],null,dx<0?1:-1)},{passive:true});
+    if(el.closest&&el.closest(".jump,input,select,textarea")||hScroll(el)){s0=null;return}
+    s0={x:t.clientX,y:t.clientY,t:Date.now(),lock:null,dx:0}},{passive:true});
+  m.addEventListener("touchmove",function(e){
+    if(!s0)return;var t=e.touches[0],dx=t.clientX-s0.x,dy=t.clientY-s0.y;
+    if(!s0.lock){if(Math.abs(dx)<LOCK&&Math.abs(dy)<LOCK)return;
+      s0.lock=(Date.now()-s0.t<HOLD&&Math.abs(dx)>1.2*Math.abs(dy))?"h":"v";
+      if(s0.lock==="v"){s0=null;return}}
+    var ids=groupsAll().map(function(g){return g.id}),i=ids.indexOf(curTab);
+    if((dx>0&&i===0)||(dx<0&&i===ids.length-1))dx=dx/3;   /* Widerstand am Rand */
+    s0.dx=dx;var g=cur();if(g){g.style.transition="none";g.style.transform="translateX("+dx+"px)"}
+    if(e.cancelable)e.preventDefault()},{passive:false});
+  function end(){
+    if(!s0||s0.lock!=="h"){s0=null;return}
+    var g=cur(),dx=s0.dx,v=Math.abs(dx)/Math.max(1,Date.now()-s0.t),W=window.innerWidth;
+    var ids=groupsAll().map(function(x){return x.id}),i=ids.indexOf(curTab),n=i+(dx<0?1:-1);s0=null;if(!g)return;
+    if((Math.abs(dx)>W*0.22||v>0.5)&&n>=0&&n<ids.length&&Math.abs(dx)>30){
+      g.style.transition="transform .16s ease-in";g.style.transform="translateX("+(dx<0?-W:W)+"px)";
+      setTimeout(function(){g.style.transition="";g.style.transform="";showTab(ids[n],null,dx<0?1:-1)},160);
+    }else{g.style.transition="transform .2s ease-out";g.style.transform="";setTimeout(function(){g.style.transition=""},220)}
+  }
+  m.addEventListener("touchend",end,{passive:true});m.addEventListener("touchcancel",end,{passive:true});
 })();
 /* ─── Karten verdichten: Kernzahlen oben, Rest unter „Details" ─── */
 function keysMap(){return {"p-ziel":["Vermögen","Abweichung"],"p-alloc":["China-ADR (NIO + BABA)","ETF-Kern"],"p-puffer":["Puffer","Es fehlen","Überschuss über Schwelle"],
