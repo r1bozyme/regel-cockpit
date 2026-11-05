@@ -78,6 +78,9 @@ a.chip:hover{border-color:var(--accent)}
 .meter i{position:absolute;top:-4px;bottom:-4px;width:2px;background:var(--ink)}
 .meter b{position:absolute;top:-4px;bottom:-4px;background:var(--ink);opacity:.14;border-radius:3px}
 #app-version a{color:var(--accent);font-weight:600}
+@media (prefers-reduced-motion:no-preference){.group.in-l{animation:inL .22s ease-out}.group.in-r{animation:inR .22s ease-out}}
+@keyframes inL{from{transform:translateX(28px);opacity:.3}to{transform:none;opacity:1}}
+@keyframes inR{from{transform:translateX(-28px);opacity:.3}to{transform:none;opacity:1}}
 @media (prefers-reduced-motion:no-preference){html{scroll-behavior:smooth}}
 @media (display-mode:standalone),(display-mode:fullscreen){.wrap{padding-block-start:6px}}
 /* Statusleiste: Inhalt läuft dahinter, ein leicht milchiger Schleier hält Uhrzeit und Akku lesbar */
@@ -205,7 +208,7 @@ td{font-family:var(--f-data)}
 (function(){
 "use strict";
 var CFG_KEY="fc-sync", API="https://api.github.com";
-var BUILD="2026-11-05 00:10";
+var BUILD="2026-11-05 07:30";
 var $=function(s){return document.querySelector(s)};
 var D={rules:null,snap:null,weekly:null,state:null,stateSha:null,err:null};
 
@@ -574,10 +577,13 @@ showVersion(null);checkVersion();
 /* ─── Reiter: immer nur ein Bereich sichtbar ─── */
 var TAB_KEY="fc-tab";
 function groupsAll(){return [].slice.call(document.querySelectorAll("#main .group"))}
-function showTab(id,target){
+var curTab=null;
+function showTab(id,target,dir){
   var gs=groupsAll();if(!gs.some(function(g){return g.id===id}))id="g-status";
-  gs.forEach(function(g){g.hidden=g.id!==id});
-  document.querySelectorAll(".jump a").forEach(function(a){a.classList.toggle("on",a.getAttribute("href")==="#"+id)});
+  gs.forEach(function(g){g.hidden=g.id!==id;g.classList.remove("in-l","in-r");if(g.id===id&&dir){void g.offsetWidth;g.classList.add(dir>0?"in-l":"in-r")}});
+  curTab=id;
+  document.querySelectorAll(".jump a").forEach(function(a){var on=a.getAttribute("href")==="#"+id;a.classList.toggle("on",on);
+    if(on&&a.scrollIntoView)try{a.scrollIntoView({inline:"center",block:"nearest"})}catch(e){}});
   try{localStorage.setItem(TAB_KEY,id)}catch(e){}
   var t=target&&document.getElementById(target);
   if(t){var d=t.querySelector("details.more");if(d)d.open=true;t.scrollIntoView({block:"start"})}else window.scrollTo(0,0);
@@ -591,6 +597,19 @@ document.addEventListener("click",function(e){
 (function(){var h=location.hash.slice(1),saved=null;try{saved=localStorage.getItem(TAB_KEY)}catch(e){}
   var el=h&&document.getElementById(h),g=el&&(el.classList.contains("group")?el:el.closest(".group"));
   showTab(g?g.id:(saved||"g-status"),g&&g!==el?h:null)})();
+/* ─── Wischen: links/rechts wechselt den Reiter ─── */
+(function(){
+  var sx=0,sy=0,st=0,ok=false,m=document.getElementById("main");if(!m)return;
+  m.addEventListener("touchstart",function(e){
+    var t=e.touches[0],el=e.target;
+    ok=e.touches.length===1&&!(el.closest&&el.closest(".jump,svg,.chart,input,button,.seg,.alloc,.meter"));
+    sx=t.clientX;sy=t.clientY;st=Date.now()},{passive:true});
+  m.addEventListener("touchend",function(e){
+    if(!ok)return;ok=false;var t=e.changedTouches[0],dx=t.clientX-sx,dy=t.clientY-sy;
+    if(Math.abs(dx)<60||Math.abs(dx)<1.6*Math.abs(dy)||Date.now()-st>700)return;
+    var ids=groupsAll().map(function(g){return g.id}),i=ids.indexOf(curTab),n=i+(dx<0?1:-1);
+    if(n<0||n>=ids.length)return;showTab(ids[n],null,dx<0?1:-1)},{passive:true});
+})();
 /* ─── Karten verdichten: Kernzahlen oben, Rest unter „Details" ─── */
 function keysMap(){return {"p-ziel":["Vermögen","Abweichung"],"p-alloc":["China-ADR (NIO + BABA)","ETF-Kern"],"p-puffer":["Puffer","Es fehlen","Überschuss über Schwelle"],
   "p-spar":["Überschuss","Angelegt"],"p-gem":["Lücke / Monat","Überdeckung","Einzahlung"],"p-nio":["Bestand","Z0"],"p-baba":["Bestand","Bis T1"]}}
