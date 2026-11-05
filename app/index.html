@@ -78,6 +78,9 @@ a.chip:hover{border-color:var(--accent)}
 .meter i{position:absolute;top:-4px;bottom:-4px;width:2px;background:var(--ink)}
 .meter b{position:absolute;top:-4px;bottom:-4px;background:var(--ink);opacity:.14;border-radius:3px}
 #app-version a{color:var(--accent);font-weight:600}
+/* Untertitel, Snapshot-Stand und Knöpfe nur im Status-Reiter – außer der Snapshot ist veraltet */
+body:not(.tab-status) header .sub{display:none}
+body:not(.tab-status) header .row:not(:has(.stale)){display:none}
 @media (prefers-reduced-motion:no-preference){.group.in-l{animation:inL .22s ease-out}.group.in-r{animation:inR .22s ease-out}}
 @keyframes inL{from{transform:translateX(28px);opacity:.3}to{transform:none;opacity:1}}
 @keyframes inR{from{transform:translateX(-28px);opacity:.3}to{transform:none;opacity:1}}
@@ -208,7 +211,7 @@ td{font-family:var(--f-data)}
 (function(){
 "use strict";
 var CFG_KEY="fc-sync", API="https://api.github.com";
-var BUILD="2026-11-05 07:50";
+var BUILD="2026-11-05 08:00";
 var $=function(s){return document.querySelector(s)};
 var D={rules:null,snap:null,weekly:null,state:null,stateSha:null,err:null};
 
@@ -581,7 +584,7 @@ var curTab=null;
 function showTab(id,target,dir){
   var gs=groupsAll();if(!gs.some(function(g){return g.id===id}))id="g-status";
   gs.forEach(function(g){g.hidden=g.id!==id;g.classList.remove("in-l","in-r");if(g.id===id&&dir){void g.offsetWidth;g.classList.add(dir>0?"in-l":"in-r")}});
-  curTab=id;
+  curTab=id;document.body.classList.toggle("tab-status",id==="g-status");
   document.querySelectorAll(".jump a").forEach(function(a){var on=a.getAttribute("href")==="#"+id;a.classList.toggle("on",on);
     if(on&&a.scrollIntoView)try{a.scrollIntoView({inline:"center",block:"nearest"})}catch(e){}});
   try{localStorage.setItem(TAB_KEY,id)}catch(e){}
