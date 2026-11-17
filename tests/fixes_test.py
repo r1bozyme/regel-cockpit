@@ -16,6 +16,7 @@ JS="""()=>({chips:[...document.querySelectorAll('#status .chip')].map(c=>c.inner
   nio:(document.querySelector('#p-nio dl.kv')||{}).innerText||'', baba:(document.querySelector('#p-baba dl.kv')||{}).innerText||'',
   week:document.querySelector('#p-week .body').innerText.replace(/\\n+/g,' | '),
   termine:[...document.querySelectorAll('#p-rules tbody tr')].map(r=>r.innerText.replace(/\\s+/g,' ')),
+  ziel:(document.querySelector('#p-ziel .body')||{}).innerText||'',
   fresh:document.getElementById('fresh').textContent})"""
 def run(p,clock,mut=None):
     F=copy.deepcopy(REAL)
@@ -95,5 +96,14 @@ with sync_playwright() as p:
     check("7 Beides: „Liquiditätsregel aktiv, TOR 3 rot“","Liquiditätsregel aktiv, TOR 3 rot" in o["baba"],o["baba"])
     # Echte Daten heute ohne Fehler
     o=run(p,NOW); check("Echte Daten heute: keine Fehler, Z0 terminiert, 134 Tage",not o["errs"] and "terminiert" in z0chip(o) and "noch 134 Tage" in z0chip(o),z0chip(o))
+    # Entscheidungen 3, 8, 9 (17.11.)
+    o=run(p,NOW)
+    check("3 Z0-Kachel nennt Wochenschluss als Bedingung","Entfällt nur bei Wochenschluss über $6,32 vor dem Termin" in z0chip(o),z0chip(o))
+    check("8 Basisfall heute mit Soll-Sparraten (Sep 0, Okt/Nov 1.200): 231.517 €","231.517" in o["ziel"] and "-22.847" in o["ziel"].replace("−","-"),o["ziel"][:120])
+    check("9 So weiter wie bisher mit Ø angelegt Aug–Okt: 1.268 €/Mt","1.268" in o["ziel"] and "Ø angelegten Betrag" in o["ziel"],"")
+    def noinv(F):
+        for r in F["snapshot.json"]["sparplan"]: r.pop("investiert",None)
+    o=run(p,NOW,noinv); check("9 Ohne „investiert“: Rückfall auf Ø-Überschuss (1.852 €)","1.852" in o["ziel"] and "Ø-Überschuss" in o["ziel"] and not o["errs"],o["errs"])
+    o=run(p,NOW,lambda F:F["rules.json"].pop("sollSparrate")); check("8 Ohne sollSparrate: kein Absturz",not o["errs"] and "Basisfall heute" in o["ziel"],o["errs"])
 srv.shutdown()
 print("FEHLER:",fails); sys.exit(1 if fails else 0)

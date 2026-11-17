@@ -19,11 +19,13 @@ function dDE(iso){return new Date(iso+"T12:00:00").toLocaleDateString("de-DE")}
 function calDays(iso){var a=new Date(),t=new Date(iso+"T00:00:00");a.setHours(0,0,0,0);return Math.round((t-a)/864e5)}
 function tageText(n){return n===0?"heute":n===1?"morgen":n<0?"vorbei":"noch "+n.toLocaleString("de-DE")+" Tage"}
 /* Z0 bewertet an EINER Stelle für Status-Kachel und Wochenschluss-Karte (vorher widersprachen sie sich).
-   Upside zählt laut Regelwerk nur VOR dem Termin, und erst nach der Festlegung von Z0 am 04.11.2026. */
-var Z0_SEIT="2026-11-04";
+   Upside = WOCHENschluss (letzter NYSE-Handelstag der Woche) über der Schwelle, präzisiert am 17.11.2026:
+   ein einzelner Tagesschluss lässt Z0 nicht entfallen. Zählt nur VOR dem Termin und erst nach der
+   Festlegung von Z0 (rules.json: nio.stufe0.z0Festgelegt). */
+function z0Seit(){return D.rules.nio.stufe0.z0Festgelegt||"2026-11-04"}
 function z0Lage(){
   var N=D.rules.nio,z0=N.stufe0.z0Datum,up=N.upsideUsd,w=(D.weekly&&D.weekly.nio)||[];
-  var hit=w.find(function(x){return x.closeUsd>up&&x.datum>Z0_SEIT&&(!z0||x.datum<z0)})||null;
+  var hit=w.find(function(x){return x.closeUsd>up&&x.datum>z0Seit()&&(!z0||x.datum<z0)})||null;
   return {z0:z0,up:up,hit:hit,tage:z0?calDays(z0):null};
 }
 /* Fehlende NIO-Wochenschlüsse: jede Woche (Mo–Fr) zwischen erstem Eintrag und der letzten fälligen Woche
@@ -155,9 +157,25 @@ function stufe0(){
   var last2=w.slice(-2);
   return {weeks:w,both:last2.length===2&&last2.every(function(x){return x.closeUsd<t}),last:w[w.length-1]};
 }
+/* Soll-Sparrate eines Monats: Wert aus rules.sollSparrate; vor dem ersten Soll-Monat 0 (Umzugsmonat, kein Ziel),
+   nach dem letzten die volle Plan-Sparrate. */
+var MON=["Jan","Feb","Mär","Apr","Mai","Jun","Jul","Aug","Sep","Okt","Nov","Dez"];
+function monIdx(key){var p=key.split(" ");return (+p[1])*12+MON.indexOf(p[0])}
+function sollRate(y,m){
+  var S=D.rules.sollSparrate||{},z=D.rules.zielpfad,k=MON[m]+" "+y;if(S[k]!=null)return S[k];
+  var idx=Object.keys(S).map(monIdx).filter(function(v){return !isNaN(v)});if(!idx.length)return z.sparrate;
+  return y*12+m<Math.min.apply(null,idx)?0:z.sparrate;
+}
+/* „Basisfall heute“: Startwert mit Monatszins und den SOLL-Sparraten fortgeschrieben (17.11.2026). Vorher
+   pauschal 1.540 €/Mt ab Start – strenger als das eigene Soll (Sep kein Ziel, Okt–Mär 1.200 €), die
+   Abweichung sah dadurch um einige Tausend Euro schlechter aus. Das Zieldatum bleibt der kalibrierte
+   Basisfall mit voller Sparrate (simulate). */
 function expectedToday(){
-  var z=D.rules.zielpfad,r=z.rendite/12,n=Math.max(0,(Date.now()-new Date(z.startDatum))/(864e5*30.4375));
-  return z.startWert*Math.pow(1+r,n)+z.sparrate*((Math.pow(1+r,n)-1)/r);
+  var z=D.rules.zielpfad,r=z.rendite/12,sd=new Date(z.startDatum),n=Math.max(0,(Date.now()-sd)/(864e5*30.4375));
+  var v=z.startWert,full=Math.floor(n),frac=n-full,y=sd.getFullYear(),m=sd.getMonth();
+  for(var k=0;k<=full;k++){m++;if(m>11){m=0;y++}
+    var f=k<full?1:frac;v=v*Math.pow(1+r,f)+sollRate(y,m)*f}
+  return v;
 }
 
 /* ─── Darstellung ─── */
@@ -174,7 +192,7 @@ function renderStatus(d){
   if(!z0){zs="crit";zp='<span class="pill crit">offen</span>';zn=R.nio.stufe0.status+". Kein Z0-Termin in rules.json."}
   else if(L.hit){zs="ok";zp='<span class="pill ok">entfällt</span>';zn="Wochenschluss "+dDE(L.hit.datum)+" über "+upTxt+": Upside-Trigger vor dem Termin, Z0 entfällt."}
   else if(zd<=0){zs="crit";zp='<span class="pill crit">fällig</span>';zn="Z0 "+(zd===0?"heute":"seit "+dDE(z0))+" fällig: "+R.nio.stufe0.stueck.toLocaleString("de-DE")+" Stück verkaufen, kursunabhängig."}
-  else{zs="warn";zp='<span class="pill warn">terminiert</span>';zn="Pflichtverkauf "+R.nio.stufe0.stueck.toLocaleString("de-DE")+" Stück am "+dDE(z0)+", "+tageText(zd)+". Entfällt nur bei Schluss über "+upTxt+" vor dem Termin. K1/K3 lösen früher aus."}
+  else{zs="warn";zp='<span class="pill warn">terminiert</span>';zn="Pflichtverkauf "+R.nio.stufe0.stueck.toLocaleString("de-DE")+" Stück am "+dDE(z0)+", "+tageText(zd)+". Entfällt nur bei Wochenschluss über "+upTxt+" vor dem Termin. K1/K3 lösen früher aus."}
   if(fw.length)zn+=' <b style="color:var(--warn)">Wochenschluss fehlt: '+wochenText(fw)+'.</b>';
   out.push(chip("NIO Z0",d&&d.nio?usd(d.nio.kursEur*d.fx):"–",zn+(d&&!d.nio?" Keine NIO-Position im Snapshot.":""),zs,zp,"#p-nio"));
   /* Erreichte Leiterstufen als eigene Kachel – vorher meldete das Cockpit sie nirgends */
@@ -228,7 +246,7 @@ function renderWeek(){
   (fw.length?'<div class="err">Wochenschluss fehlt: '+wochenText(fw)+'. Der Samstags-Task hat diese Woche nicht eingetragen – nachtragen, sonst kann ein Upside-Schluss übersehen werden.</div>':'')+
   '<p class="foot">'+(L.hit?"Upside-Trigger am "+dDE(L.hit.datum)+" erreicht, vor dem Termin: Z0 entfällt."
     :"Upside-Trigger vor dem Termin nicht erreicht. Z0 ("+(L.z0?dDE(L.z0):"–")+") "+(L.z0&&L.tage<=0?"ist fällig.":"bleibt bestehen.")+
-     (L.z0&&L.tage<=0&&s0.weeks.some(function(w){return w.closeUsd>up&&w.datum>=L.z0})?" Ein Schluss über "+upTxt+" ab dem Termin zählt nicht mehr.":""))+'</p>';
+     (L.z0&&L.tage<=0&&s0.weeks.some(function(w){return w.closeUsd>up&&w.datum>=L.z0})?" Ein Wochenschluss über "+upTxt+" ab dem Termin zählt nicht mehr.":""))+'</p>';
 }
 function renderAlloc(d){
   var el=body("#p-alloc");if(!d){el.innerHTML='<div class="empty">Kein Snapshot.</div>';return}
@@ -256,7 +274,7 @@ function renderBaba(d){
   '<dt>Nachkauf</dt><dd>'+nachkauf(d)+'</dd></dl>';
 }
 function renderSpar(){
-  var el=body("#p-spar"),rows=(D.snap&&D.snap.sparplan)||[],soll=D.rules.sollSparrate;
+  var el=body("#p-spar"),rows=(D.snap&&D.snap.sparplan)||[],soll=D.rules.sollSparrate||{};
   var show=rows.filter(function(r){return r.ueberschuss!=null||soll[r.monat]!=null});
   if(!show.length){el.innerHTML='<div class="empty">Keine Sparplan-Werte im Snapshot.</div>';return}
   var W=460,H=190,L=44,B=24,T=10;
@@ -318,10 +336,14 @@ function simulate(v0,rate,start,goal,ret){
 }
 function monthYear(dt){return dt.toLocaleDateString("de-DE",{month:"short",year:"numeric"})}
 function monthsBetween(a,b){return (b.getFullYear()-a.getFullYear())*12+(b.getMonth()-a.getMonth())}
+/* „So weiter wie bisher“: Ø des tatsächlich ANGELEGTEN Betrags der letzten 3 abgeschlossenen Monate
+   (17.11.2026, vorher Ø-Überschuss). Der Überschuss enthält keine Einmaleffekte (Einrichtung, Ablöse) und
+   überschätzt, was wirklich im Vermögen ankommt. Fehlt „investiert“, gilt ersatzweise der Überschuss. */
 function istRate(){
   var rows=((D.snap&&D.snap.sparplan)||[]).filter(function(r){return r.ueberschuss!=null}).slice(-3);
   if(!rows.length)return null;
-  return {rate:rows.reduce(function(a,r){return a+r.ueberschuss},0)/rows.length,
+  var inv=rows.every(function(r){return r.investiert!=null});
+  return {rate:rows.reduce(function(a,r){return a+(inv?r.investiert:r.ueberschuss)},0)/rows.length,inv:inv,
     label:rows.map(function(r){return r.monat.slice(0,3)}).join("–")};
 }
 function pathChart(series,goal,start,end){
@@ -379,8 +401,9 @@ function renderZiel(d){
   '<tr><td>Heutiger Stand, Plan-Sparrate</td><td>'+monthYear(kurs.date)+'</td><td style="color:'+col(kurs)+'">'+delta(kurs)+'</td></tr>'+
   (trend?'<tr><td>So weiter wie bisher</td><td>'+monthYear(trend.date)+'</td><td style="color:'+col(trend)+'">'+delta(trend)+'</td></tr>':'')+
   '</tbody></table>'+
-  (z.ziel>=1e6?'<p class="foot">Ziel 3 hat bewusst kein Datum. Die Werte zeigen nur, wohin die heutige Kurve führt; der größte Hebel bleibt das Einkommen, nicht die Sparrate.</p>':'')+'<p class="foot">„So weiter wie bisher" startet beim heutigen Vermögen und spart mit dem Ø-Überschuss '+(ir?ir.label:"")+'. '+
+  (z.ziel>=1e6?'<p class="foot">Ziel 3 hat bewusst kein Datum. Die Werte zeigen nur, wohin die heutige Kurve führt; der größte Hebel bleibt das Einkommen, nicht die Sparrate.</p>':'')+'<p class="foot">„So weiter wie bisher" startet beim heutigen Vermögen und spart mit dem '+(ir&&ir.inv?"Ø angelegten Betrag":"Ø-Überschuss")+' '+(ir?ir.label:"")+'. '+
   'Davon gehen '+(kursM>=0?"+":"")+kursM+' Mon. auf die Kursentwicklung seit '+dDE(z.startDatum)+' und '+(rateM>=0?"+":"")+rateM+' Mon. auf die Sparrate. '+
+  '„Basisfall heute“ rechnet mit den Soll-Sparraten der einzelnen Monate, das Zieldatum mit '+eur(z.sparrate)+'/Mt. '+
   'Alle Szenarien rechnen mit '+pct(z.rendite,0)+' p. a. auf das gesamte Vermögen, obwohl '+pct(d.spec,0)+' in Einzelwerten und Krypto stecken.</p>';
 }
 function renderPuffer(){
