@@ -13,8 +13,38 @@ function eur(v,d){d=d||0;return v==null||isNaN(v)?"–":v.toLocaleString("de-DE"
 function usd(v){return "$"+v.toLocaleString("de-DE",{minimumFractionDigits:2,maximumFractionDigits:2})}
 function pct(v,d){d=d==null?1:d;return (v*100).toLocaleString("de-DE",{minimumFractionDigits:d,maximumFractionDigits:d})+" %"}
 function esc(s){return String(s).replace(/[&<>"]/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]})}
-function days(d){return Math.ceil((d-Date.now())/864e5)}
 function dDE(iso){return new Date(iso+"T12:00:00").toLocaleDateString("de-DE")}
+/* Kalendertage bis zu einem Datum (Ortszeit): 0 = heute, 1 = morgen, <0 = vorbei.
+   Früher Math.ceil auf eine Uhrzeit – am Stichtag selbst stand dann „noch 1 Tag“, abends „-0“. */
+function calDays(iso){var a=new Date(),t=new Date(iso+"T00:00:00");a.setHours(0,0,0,0);return Math.round((t-a)/864e5)}
+function tageText(n){return n===0?"heute":n===1?"morgen":n<0?"vorbei":"noch "+n.toLocaleString("de-DE")+" Tage"}
+/* Z0 bewertet an EINER Stelle für Status-Kachel und Wochenschluss-Karte (vorher widersprachen sie sich).
+   Upside zählt laut Regelwerk nur VOR dem Termin, und erst nach der Festlegung von Z0 am 04.11.2026. */
+var Z0_SEIT="2026-11-04";
+function z0Lage(){
+  var N=D.rules.nio,z0=N.stufe0.z0Datum,up=N.upsideUsd,w=(D.weekly&&D.weekly.nio)||[];
+  var hit=w.find(function(x){return x.closeUsd>up&&x.datum>Z0_SEIT&&(!z0||x.datum<z0)})||null;
+  return {z0:z0,up:up,hit:hit,tage:z0?calDays(z0):null};
+}
+/* Fehlende NIO-Wochenschlüsse: jede Woche (Mo–Fr) zwischen erstem Eintrag und der letzten fälligen Woche
+   braucht einen Eintrag. Fällig ist eine Woche ab Samstag 10 Uhr (Task läuft samstags 8:50). Ein Eintrag
+   an einem anderen Wochentag (Feiertag, z. B. Karfreitag) deckt seine Woche ab. */
+function fehlendeWochen(){
+  var w=(D.weekly&&D.weekly.nio)||[];if(!w.length)return [];
+  function mo(iso){var d=new Date(iso+"T12:00:00");d.setDate(d.getDate()-((d.getDay()+6)%7));return d}
+  function key(d){return d.getFullYear()+"-"+(d.getMonth()+1)+"-"+d.getDate()}
+  var have={};w.forEach(function(x){have[key(mo(x.datum))]=1});
+  var now=new Date(),last=new Date(now);last.setDate(now.getDate()-((now.getDay()+6)%7));last.setHours(12,0,0,0);
+  var sat10=new Date(last);sat10.setDate(last.getDate()+5);sat10.setHours(10,0,0,0);
+  if(now<sat10)last.setDate(last.getDate()-7);
+  var out=[];for(var d=mo(w[0].datum);d<=last;d.setDate(d.getDate()+7)){
+    if(!have[key(d)]){var f=new Date(d);f.setDate(d.getDate()+4);out.push(f.toLocaleDateString("de-DE"))}}
+  return out;
+}
+/* Erreichte Verkaufsstufen (Kurs in EUR ≥ Stufe). Ob schon verkauft wurde, kann das Cockpit nicht wissen –
+   es nennt den Bestand, damit man es sieht. */
+function wochenText(fw){return fw.length>3?fw.length+" Wochen, zuletzt "+fw.slice(-3).join(", "):fw.join(", ")}
+function erreichteStufen(stufen,kursEur){return (stufen||[]).filter(function(t){return kursEur>=t.eur})}
 
 /* ─── Konfiguration (Token nur lokal) ─── */
 function cfg(){try{return JSON.parse(localStorage.getItem(CFG_KEY))||{}}catch(e){return {}}}
@@ -139,14 +169,21 @@ function renderStatus(d){
   if(p==null)out.push(chip("Liquiditätsregel","–","Puffer unter Liquidität eintragen.","","","#p-puffer"));
   else{var act=p<R.liquiditaet.pufferMin;
     out.push(chip("Liquiditätsregel",eur(p),act?"Unter "+eur(R.liquiditaet.pufferMin)+": keine Einzelaktien-Zukäufe. ETF-Sparplan läuft weiter. Es fehlen "+eur(R.liquiditaet.pufferMin-p)+".":"Über "+eur(R.liquiditaet.pufferMin)+": Zukäufe regelkonform möglich.",act?"warn":"ok",act?'<span class="pill warn">aktiv</span>':'<span class="pill ok">inaktiv</span>',"#p-puffer"))}
-  var s0=stufe0(),z0=R.nio.stufe0.z0Datum,zd=z0?days(new Date(z0+"T15:30:00+02:00")):null,up=R.nio.upsideUsd;
-  var upHit=s0.weeks.some(function(w){return w.closeUsd>up&&w.datum>"2026-11-04"&&(!z0||w.datum<=z0)});
+  var L=z0Lage(),z0=L.z0,zd=L.tage,up=L.up,upTxt="$"+up.toFixed(2).replace(".",","),fw=fehlendeWochen();
   var zs,zp,zn;
   if(!z0){zs="crit";zp='<span class="pill crit">offen</span>';zn=R.nio.stufe0.status+". Kein Z0-Termin in rules.json."}
-  else if(upHit){zs="ok";zp='<span class="pill ok">entfällt</span>';zn="Wochenschluss über $"+up.toFixed(2).replace(".",",")+" erreicht: Upside-Trigger, Z0 entfällt."}
-  else if(zd<=0){zs="crit";zp='<span class="pill crit">fällig</span>';zn="Z0 fällig: "+R.nio.stufe0.stueck.toLocaleString("de-DE")+" Stück verkaufen, kursunabhängig."}
-  else{zs="warn";zp='<span class="pill warn">terminiert</span>';zn="Pflichtverkauf "+R.nio.stufe0.stueck.toLocaleString("de-DE")+" Stück am "+dDE(z0)+", noch "+zd+" "+(zd===1?"Tag":"Tage")+". Entfällt nur bei Schluss über $"+up.toFixed(2).replace(".",",")+". K1/K3 lösen früher aus."}
-  out.push(chip("NIO Z0",d?usd(d.nio.kursEur*d.fx):"–",zn,zs,zp,"#p-nio"));
+  else if(L.hit){zs="ok";zp='<span class="pill ok">entfällt</span>';zn="Wochenschluss "+dDE(L.hit.datum)+" über "+upTxt+": Upside-Trigger vor dem Termin, Z0 entfällt."}
+  else if(zd<=0){zs="crit";zp='<span class="pill crit">fällig</span>';zn="Z0 "+(zd===0?"heute":"seit "+dDE(z0))+" fällig: "+R.nio.stufe0.stueck.toLocaleString("de-DE")+" Stück verkaufen, kursunabhängig."}
+  else{zs="warn";zp='<span class="pill warn">terminiert</span>';zn="Pflichtverkauf "+R.nio.stufe0.stueck.toLocaleString("de-DE")+" Stück am "+dDE(z0)+", "+tageText(zd)+". Entfällt nur bei Schluss über "+upTxt+" vor dem Termin. K1/K3 lösen früher aus."}
+  if(fw.length)zn+=' <b style="color:var(--warn)">Wochenschluss fehlt: '+wochenText(fw)+'.</b>';
+  out.push(chip("NIO Z0",d&&d.nio?usd(d.nio.kursEur*d.fx):"–",zn+(d&&!d.nio?" Keine NIO-Position im Snapshot.":""),zs,zp,"#p-nio"));
+  /* Erreichte Leiterstufen als eigene Kachel – vorher meldete das Cockpit sie nirgends */
+  [["NIO",d&&d.nio,R.nio.stufen,"#p-nio"],["BABA",d&&d.baba,R.baba.stufen,"#p-baba"]].forEach(function(x){
+    var pos=x[1];if(!pos)return;var hit=erreichteStufen(x[2],pos.kursEur);if(!hit.length)return;
+    var top=hit[hit.length-1];
+    out.push(chip(x[0]+"-Leiter",eur(pos.kursEur,2),hit.map(function(t){return t.name+" ("+eur(t.eur)+"): "+t.stueck.toLocaleString("de-DE")+" Stück"}).join(" · ")+
+      " verkaufen, falls noch nicht geschehen. Bestand jetzt "+pos.stueck.toLocaleString("de-DE")+" Stück."+(top.hinweis?" "+esc(top.hinweis)+".":""),
+      "crit",'<span class="pill crit">'+esc(top.name)+' erreicht</span>',x[3]))});
   if(d){var over=d.china>R.chinaAdrMax;
     out.push(chip("China-ADR-Anteil",pct(d.china),"NIO + BABA, Grenze "+pct(R.chinaAdrMax,0)+". "+(over?"TOR 3 rot, kein BABA-Nachkauf.":"Unter der Grenze."),over?"warn":"ok",over?'<span class="pill warn">über Grenze</span>':'<span class="pill ok">im Rahmen</span>',"#p-alloc"));
     out.push(chip("Spekulativer Anteil",pct(d.spec),"NIO, BABA, GRAB, Krypto. Der 7-%-Pfad unterstellt einen breiten Markt.",d.spec>0.4?"warn":"ok","","#p-alloc"))}
@@ -176,7 +213,7 @@ function renderNio(d){
   el.innerHTML='<div class="chart">'+ladderSvg(pts,cur,2.5,20,true,function(v){return "$"+v.toFixed(2).replace(".",",")})+'</div>'+
   '<dl class="kv"><dt>Bestand</dt><dd>'+n.stueck.toLocaleString("de-DE")+' Stück · '+eur(n.wertEur)+'</dd>'+
   '<dt>Kurs</dt><dd>'+eur(n.kursEur,2)+' / '+usd(cur)+'</dd>'+
-  '<dt>Z0</dt><dd>'+(N.stufe0.z0Datum?dDE(N.stufe0.z0Datum)+' · noch '+Math.max(0,days(new Date(N.stufe0.z0Datum+"T15:30:00+02:00")))+' Tage':'–')+'</dd>'+
+  '<dt>Z0</dt><dd>'+(N.stufe0.z0Datum?dDE(N.stufe0.z0Datum)+' · '+tageText(calDays(N.stufe0.z0Datum)):'–')+'</dd>'+
   '<dt>Bis Upside</dt><dd>+'+pct(N.upsideUsd/cur-1)+'</dd>'+
   '<dt>Z0 Volumen</dt><dd>'+N.stufe0.stueck.toLocaleString("de-DE")+' Stück ≈ '+eur(N.stufe0.stueck*n.kursEur)+' (heute)</dd>'+
   '<dt>2030 Bear / Base / Bull</dt><dd>'+usd(e.bear)+' / '+usd(e.base)+' / '+usd(e.bull)+'</dd></dl>';
@@ -184,10 +221,14 @@ function renderNio(d){
 function renderWeek(){
   var el=body("#p-week"),s0=stufe0(),t=D.rules.nio.stufe0.triggerUsd,up=D.rules.nio.upsideUsd;
   if(!s0.weeks.length){el.innerHTML='<div class="empty">Noch keine Wochenschlüsse erfasst. Der geplante Task trägt sie samstags früh nach US-Börsenschluss ein.</div>';return}
-  var rows=s0.weeks.slice(-8).reverse().map(function(w){var st=w.closeUsd>up?'<span class="pill ok">über $6,32</span>':'<span class="pill warn">unter $6,32</span>';
+  var upTxt="$"+up.toFixed(2).replace(".",","),L=z0Lage(),fw=fehlendeWochen();
+  var rows=s0.weeks.slice(-8).reverse().map(function(w){var st=w.closeUsd>up?'<span class="pill ok">über '+upTxt+'</span>':'<span class="pill warn">unter '+upTxt+'</span>';
     return '<tr><td>'+dDE(w.datum)+'</td><td>'+usd(w.closeUsd)+'</td><td>'+st+'</td></tr>'}).join("");
   el.innerHTML='<div class="chart"><table><thead><tr><th>Woche bis</th><th>Schluss</th><th>Status</th></tr></thead><tbody>'+rows+'</tbody></table></div>'+
-  '<p class="foot">'+(s0.weeks.some(function(w){return w.closeUsd>up&&w.datum>"2026-11-04"})?"Upside-Trigger erreicht: Z0 entfällt.":"Upside-Trigger nicht erreicht. Z0 ("+(D.rules.nio.stufe0.z0Datum?dDE(D.rules.nio.stufe0.z0Datum):"–")+") bleibt bestehen.")+'</p>';
+  (fw.length?'<div class="err">Wochenschluss fehlt: '+wochenText(fw)+'. Der Samstags-Task hat diese Woche nicht eingetragen – nachtragen, sonst kann ein Upside-Schluss übersehen werden.</div>':'')+
+  '<p class="foot">'+(L.hit?"Upside-Trigger am "+dDE(L.hit.datum)+" erreicht, vor dem Termin: Z0 entfällt."
+    :"Upside-Trigger vor dem Termin nicht erreicht. Z0 ("+(L.z0?dDE(L.z0):"–")+") "+(L.z0&&L.tage<=0?"ist fällig.":"bleibt bestehen.")+
+     (L.z0&&L.tage<=0&&s0.weeks.some(function(w){return w.closeUsd>up&&w.datum>=L.z0})?" Ein Schluss über "+upTxt+" ab dem Termin zählt nicht mehr.":""))+'</p>';
 }
 function renderAlloc(d){
   var el=body("#p-alloc");if(!d){el.innerHTML='<div class="empty">Kein Snapshot.</div>';return}
@@ -200,13 +241,19 @@ function renderAlloc(d){
   '<dt>China-ADR (NIO + BABA)</dt><dd>'+pct(d.china)+' / max. '+pct(R.chinaAdrMax,0)+'</dd>'+
   '<dt>Überhang über Grenze</dt><dd>'+(d.china>R.chinaAdrMax?eur((d.china-R.chinaAdrMax)*d.total):"keiner")+'</dd></dl>';
 }
+/* BABA-Nachkauf: TOR 3 (China-ADR) UND Liquiditätsregel – Einzelaktien-Zukäufe pausieren, solange der Puffer fehlt */
+function nachkauf(d){
+  var R=D.rules,p=puffer(),liq=p!=null&&p<R.liquiditaet.pufferMin,tor3=d.china>R.chinaAdrMax,g=[];
+  if(liq)g.push("Liquiditätsregel aktiv");if(tor3)g.push("TOR 3 rot");
+  return g.length?"gesperrt: "+g.join(", "):"TOR 3 grün, TOR 1/2 prüfen";
+}
 function renderBaba(d){
   var el=body("#p-baba");if(!d||!d.baba){el.innerHTML='<div class="empty">Keine BABA-Position im Snapshot.</div>';return}
   var b=d.baba,R=D.rules,pts=R.baba.stufen.map(function(t){return {v:t.eur,l:t.name,c:"var(--muted)"}});
   el.innerHTML='<div class="chart">'+ladderSvg(pts,b.kursEur,60,220,false,function(v){return v.toFixed(0)+" €"})+'</div>'+
   '<dl class="kv"><dt>Bestand</dt><dd>'+b.stueck+' Stück · '+eur(b.wertEur)+'</dd>'+
-  '<dt>Bis T1 ('+R.baba.stufen[0].eur+' €)</dt><dd>+'+pct(R.baba.stufen[0].eur/b.kursEur-1)+'</dd>'+
-  '<dt>Nachkauf</dt><dd>'+(d.china>R.chinaAdrMax?"gesperrt, TOR 3 rot":"TOR 3 grün, TOR 1/2 prüfen")+'</dd></dl>';
+  '<dt>Bis T1 ('+R.baba.stufen[0].eur+' €)</dt><dd>'+(b.kursEur>=R.baba.stufen[0].eur?"erreicht":"+"+pct(R.baba.stufen[0].eur/b.kursEur-1))+'</dd>'+
+  '<dt>Nachkauf</dt><dd>'+nachkauf(d)+'</dd></dl>';
 }
 function renderSpar(){
   var el=body("#p-spar"),rows=(D.snap&&D.snap.sparplan)||[],soll=D.rules.sollSparrate;
@@ -351,7 +398,7 @@ function renderPuffer(){
 function renderRules(){
   var all=D.rules.termine.slice().sort(function(a,b){return a.datum.localeCompare(b.datum)});
   body("#p-rules").innerHTML='<div class="chart"><table><thead><tr><th>Termin</th><th>Datum</th><th>in Tagen</th></tr></thead><tbody>'+
-  all.map(function(t){var dd=days(new Date(t.datum+"T12:00:00+02:00"));return '<tr><td>'+esc(t.name)+'</td><td>'+dDE(t.datum)+'</td><td>'+(dd<0?"vorbei":dd.toLocaleString("de-DE"))+'</td></tr>'}).join("")+
+  all.map(function(t){var dd=calDays(t.datum);return '<tr><td>'+esc(t.name)+'</td><td>'+dDE(t.datum)+'</td><td>'+(dd<0?"vorbei":dd===0?"heute":dd.toLocaleString("de-DE"))+'</td></tr>'}).join("")+
   '</tbody></table></div><p class="foot">Kill-Kriterien NIO: '+D.rules.nio.kill.map(esc).join(" · ")+'</p>';
 }
 function renderFresh(){

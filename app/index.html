@@ -11,7 +11,7 @@
 <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0f1514">
 <meta name="robots" content="noindex">
 <!-- Bei JEDER Änderung an index.html hochzählen: Der Loader unten erkennt daran eine neue Fassung -->
-<meta name="app-build" content="2026-11-17 21:15">
+<meta name="app-build" content="2026-11-17 22:00">
 <title>Regel-Cockpit</title>
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icon.svg" type="image/svg+xml">
@@ -254,6 +254,8 @@ td{font-family:var(--f-data)}
       So sind auch neues Markup und neue Einträge in MODS sofort da – die Stolperfalle aus
       training-log (alter Loader kennt neues Modul nicht) entfällt.
    3. Offline oder hängendes Netz: nach 2,5 s ohne Abgleich starten, mit der localStorage-Kopie.
+      Kommt der Abgleich danach noch an, wird er für den nächsten Start abgelegt (sonst bliebe bei
+      dauerhaft langsamem Netz für immer die alte Fassung).
       Bewusst nicht per <script src>: Chrome sperrt den Cache-Eintrag, solange der hängende
       Abgleich läuft, das Skript-Tag würde darauf warten. Abbrechen hilft nicht, Chrome verwirft
       dann den Eintrag. Ohne Kopie (allererster Start) bleibt <script src> der Rückfall.
@@ -262,7 +264,8 @@ td{font-family:var(--f-data)}
   var MODS=["scrub.js","cockpit.js"],KEY="fc-mod:";
   var build=(document.querySelector('meta[name="app-build"]')||{}).content||"";
   var done=false,texts={};
-  function stored(src){try{return localStorage.getItem(KEY+src)}catch(e){return null}}
+  /* Kopien gelten nur zusammen mit der index.html, mit der sie abgeglichen wurden (KEY+"build") */
+  function stored(src){try{return localStorage.getItem(KEY+"build")===build?localStorage.getItem(KEY+src):null}catch(e){return null}}
   function run(i){
     if(i>=MODS.length)return;
     var src=MODS[i],t=texts[src]!=null?texts[src]:stored(src),s=document.createElement("script");
@@ -274,11 +277,21 @@ td{font-family:var(--f-data)}
   setTimeout(start,2500);
   function get(u){return fetch(u,{cache:"no-cache"}).then(function(r){return r.ok?r.text():null}).catch(function(){return null})}
   var self=location.pathname+location.search;
-  Promise.all([get(self)].concat(MODS.map(function(src){return get(src).then(function(t){
-    if(t!=null&&!done){texts[src]=t;try{localStorage.setItem(KEY+src,t)}catch(e){}}
-  })}))).then(function(res){
-    if(done)return;
+  Promise.all([get(self)].concat(MODS.map(function(src){return get(src)}))).then(function(res){
     var m=res[0]&&/<meta name="app-build" content="([^"]+)"/.exec(res[0]),neu=m&&m[1];
+    /* Ablegen mit der Build-Kennung der gleichzeitig geholten index.html. Ohne sie (Abruf gescheitert)
+       nichts ablegen: dann ist unklar, zu welchem Markup die Module gehören. */
+    function keep(){
+      if(!neu)return;
+      var ok=MODS.every(function(src,i){return res[i+1]!=null});if(!ok)return;
+      try{MODS.forEach(function(src,i){localStorage.setItem(KEY+src,res[i+1])});localStorage.setItem(KEY+"build",neu)}catch(e){}
+    }
+    /* Zu spät für diesen Start (langsames Netz): trotzdem für den nächsten Start ablegen. Der nächste Start
+       nutzt die Kopie nur, wenn seine index.html dieselbe Kennung hat – neues Markup und neue Module
+       kommen so immer zusammen. */
+    if(done){keep();return}
+    MODS.forEach(function(src,i){if(res[i+1]!=null)texts[src]=res[i+1]});
+    keep();
     var flag=null;try{flag=sessionStorage.getItem("fc-reload")}catch(e){}
     if(neu&&neu!==build&&flag!==neu){
       try{sessionStorage.setItem("fc-reload",neu)}catch(e){}
