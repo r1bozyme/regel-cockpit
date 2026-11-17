@@ -60,8 +60,9 @@ with sync_playwright() as p:
     check("2 NIO 16 €: Stufe 3 erreicht, alle drei Stufen, Hinweis Vollausstieg",nl and "Stufe 3 erreicht" in nl[0] and "Stufe 1" in nl[0] and "Stufe 2" in nl[0] and "Vollausstieg" in nl[0],nl)
     o=run(p,NOW)
     check("2 Heutige Kurse: keine Leiter-Kachel",not [c for c in o["chips"] if "LEITER" in c],o["chips"])
-    # 4 – fehlende Wochenschlüsse (echte Daten: 06.11. fehlt)
-    check("4 Echte Daten: fehlender Schluss 6.11. in Kachel und Wochenkarte","Wochenschluss fehlt: 6.11.2026" in z0chip(o) and "Wochenschluss fehlt: 6.11.2026" in o["week"],(z0chip(o),o["week"][:200]))
+    # 4 – fehlende Wochenschlüsse (06.11. herausgenommen, wie vor dem Nachtrag am 17.11.)
+    o=run(p,NOW,lambda F:F["weekly.json"].update(nio=[x for x in F["weekly.json"]["nio"] if x["datum"]!="2026-11-06"]))
+    check("4 Fehlender Schluss 6.11. in Kachel und Wochenkarte","Wochenschluss fehlt: 6.11.2026" in z0chip(o) and "Wochenschluss fehlt: 6.11.2026" in o["week"],(z0chip(o),o["week"][:200]))
     def add(*items):
         def m(F): F["weekly.json"]["nio"]=sorted(F["weekly.json"]["nio"]+[{"datum":d,"closeUsd":c} for d,c in items],key=lambda x:x["datum"])
         return m
@@ -96,8 +97,8 @@ with sync_playwright() as p:
     check("7 Beides: „Liquiditätsregel aktiv, TOR 3 rot“","Liquiditätsregel aktiv, TOR 3 rot" in o["baba"],o["baba"])
     # Echte Daten heute ohne Fehler
     o=run(p,NOW); check("Echte Daten heute: keine Fehler, Z0 terminiert, 134 Tage",not o["errs"] and "terminiert" in z0chip(o) and "noch 134 Tage" in z0chip(o),z0chip(o))
-    # Entscheidungen 3, 8, 9 (17.11.)
-    o=run(p,NOW)
+    # Entscheidungen 3, 8, 9 (17.11.) – ohne Tagesgeld, damit die Werte vom Datenstand unabhängig sind
+    o=run(p,NOW,lambda F:F["snapshot.json"].pop("tagesgeldEur",None))
     check("3 Z0-Kachel nennt Wochenschluss als Bedingung","Entfällt nur bei Wochenschluss über $6,32 vor dem Termin" in z0chip(o),z0chip(o))
     check("8 Basisfall heute mit Soll-Sparraten (Sep 0, Okt/Nov 1.200): 231.517 €","231.517" in o["ziel"] and "-22.847" in o["ziel"].replace("−","-"),o["ziel"][:120])
     check("9 So weiter wie bisher mit Ø angelegt Aug–Okt: 1.268 €/Mt","1.268" in o["ziel"] and "Ø angelegten Betrag" in o["ziel"],"")
@@ -105,5 +106,10 @@ with sync_playwright() as p:
         for r in F["snapshot.json"]["sparplan"]: r.pop("investiert",None)
     o=run(p,NOW,noinv); check("9 Ohne „investiert“: Rückfall auf Ø-Überschuss (1.852 €)","1.852" in o["ziel"] and "Ø-Überschuss" in o["ziel"] and not o["errs"],o["errs"])
     o=run(p,NOW,lambda F:F["rules.json"].pop("sollSparrate")); check("8 Ohne sollSparrate: kein Absturz",not o["errs"] and "Basisfall heute" in o["ziel"],o["errs"])
+    # Tagesgeld (17.11.)
+    o=run(p,NOW,lambda F:F["snapshot.json"].update(tagesgeldEur=500.0))
+    check("Tagesgeld zählt zum Vermögen: 208.671 + 500 = 209.171 €","209.171" in o["ziel"] and "500 €" in o["ziel"],o["ziel"][:200])
+    o=run(p,NOW,lambda F:F["snapshot.json"].pop("tagesgeldEur",None))
+    check("Ohne Tagesgeld im Snapshot: wie bisher 208.671 €, kein Fehler","208.671" in o["ziel"] and not o["errs"],o["errs"])
 srv.shutdown()
 print("FEHLER:",fails); sys.exit(1 if fails else 0)

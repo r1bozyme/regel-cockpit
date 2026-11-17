@@ -152,6 +152,8 @@ function derive(){
     china:(nv+bv)/total,spec:(nv+bv+gv+crypto)/total};
 }
 function puffer(){return D.state&&D.state.puffer?D.state.puffer.wert:null}
+/* Tagesgeld (seit 17.11.2026 im Snapshot, aus Parqet „Tagesgeldkonto“); fehlt es, zählt es als 0 */
+function tagesgeld(){return D.snap&&typeof D.snap.tagesgeldEur==="number"?D.snap.tagesgeldEur:0}
 function stufe0(){
   var w=(D.weekly&&D.weekly.nio)||[],t=D.rules.nio.stufe0.triggerUsd;
   var last2=w.slice(-2);
@@ -376,7 +378,7 @@ document.addEventListener("click",function(e){var b=e.target.closest&&e.target.c
 function renderZiel(d){
   var el=body("#p-ziel"),p=puffer();
   if(!d){el.innerHTML='<div class="empty">Kein Snapshot.</div>';return}
-  var z=Object.assign({},D.rules.zielpfad);z.ziel=goalSel();var ges=d.total+(p||0),exp=expectedToday(),diff=ges-exp,prog=ges/z.ziel;
+  var z=Object.assign({},D.rules.zielpfad);z.ziel=goalSel();var tg=tagesgeld(),ges=d.total+(p||0)+tg,exp=expectedToday(),diff=ges-exp,prog=ges/z.ziel;
   $('#ziel-title').textContent='Zielpfad '+(z.ziel>=1e6?'1 Mio. €':eur(z.ziel));
   document.querySelectorAll('#p-ziel .seg button').forEach(function(b){b.classList.toggle('on',+b.dataset.goal===z.ziel)});
   var sd=new Date(z.startDatum),basisStart=new Date(sd.getFullYear(),sd.getMonth()+1,1);
@@ -392,6 +394,7 @@ function renderZiel(d){
   var kursM=monthsBetween(basis.date,kurs.date),rateM=trend?monthsBetween(kurs.date,trend.date):0;
   el.innerHTML='<div class="alloc" style="height:14px"><span style="width:'+Math.min(100,prog*100)+'%;background:var(--accent)"></span></div>'+
   '<dl class="kv"><dt>Vermögen</dt><dd>'+eur(ges)+' · '+pct(prog)+'</dd>'+
+  '<dt>· Depot / Giro / Tagesgeld</dt><dd>'+eur(d.total)+' / '+eur(p||0)+' / '+eur(tg)+'</dd>'+
   '<dt>Basisfall heute</dt><dd>'+eur(exp)+'</dd>'+
   '<dt>Abweichung</dt><dd style="color:'+(diff>=0?"var(--ok)":"var(--crit)")+'">'+(diff>=0?"+":"")+eur(diff)+'</dd></dl>'+
   '<div class="chart">'+pathChart(series,z.ziel,basisStart,end)+'</div>'+
