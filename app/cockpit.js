@@ -20,11 +20,12 @@ function dDE(iso){return new Date(iso+"T12:00:00").toLocaleDateString("de-DE")}
 function cfg(){try{return JSON.parse(localStorage.getItem(CFG_KEY))||{}}catch(e){return {}}}
 function saveCfg(c){try{localStorage.setItem(CFG_KEY,JSON.stringify(c))}catch(e){}}
 function configured(){var c=cfg();return !!(c.token&&c.owner&&c.repo)}
-function showSetup(on){
+function showSetup(on,fromBack){
+  if(!on&&!fromBack&&typeof backLayerClose==="function")backLayerClose();
   var c=cfg();$("#setup").hidden=!on;$("#main").hidden=on&&!D.snap;
   if(on){$("#cfg-owner").value=c.owner||"";$("#cfg-repo").value=c.repo||"finance-data";$("#cfg-token").value="";$("#cfg-cancel").hidden=!configured()}
 }
-$("#cfg-btn").onclick=function(){showSetup($("#setup").hidden)};
+$("#cfg-btn").onclick=function(){var on=$("#setup").hidden;showSetup(on);if(on)backLayerOpen()};
 $("#cfg-cancel").onclick=function(){showSetup(false)};
 $("#setup").addEventListener("submit",function(e){
   e.preventDefault();var c=cfg();
@@ -75,19 +76,32 @@ $("#reload").onclick=load;
 try{var cached=JSON.parse(localStorage.getItem("fc-cache"));if(cached){D.rules=cached.rules;D.snap=cached.snap;D.weekly=cached.weekly;D.state=cached.state}}catch(e){}
 
 /* ─── Puffer speichern ─── */
+/* Datum in Ortszeit: toISOString() ist UTC – zwischen 0 und 1 Uhr (Sommerzeit 2 Uhr) stünde sonst der Vortag drin */
+function heuteISO(){var d=new Date(),p=function(n){return (n<10?"0":"")+n};return d.getFullYear()+"-"+p(d.getMonth()+1)+"-"+p(d.getDate())}
+/* Schreibt den Puffer in state.json. Bei Konflikt (409/422: Datei inzwischen geändert, z. B. durch den
+   Monatsreview) einmal den frischen Stand holen, nur den Puffer darauf setzen und erneut schreiben –
+   ein blindes zweites PUT würde die fremde Änderung überschreiben. */
+function savePuffer(v,base,sha,retry){
+  var st=Object.assign({},base||{});st.puffer={wert:v,geaendert:heuteISO(),quelle:"manuell im Cockpit"};
+  var body={message:"Puffer "+v+" €",content:b64(JSON.stringify(st,null,1)),branch:"main"};
+  if(sha)body.sha=sha;
+  return gh("state.json",{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)})
+  .then(function(r){
+    if((r.status===409||r.status===422)&&!retry){
+      return getJSON("state.json").then(function(x){D.state=x.data;D.stateSha=x.sha;return savePuffer(v,x.data,x.sha,true)});
+    }
+    if(r.status===409||r.status===422)throw new Error("Datei wurde zwischenzeitlich geändert. Bitte noch einmal speichern.");
+    if(!r.ok)throw new Error(hint(r.status));
+    return r.json().then(function(j){D.stateSha=j.content.sha;D.state=st});
+  });
+}
 $("#puffer-form").addEventListener("submit",function(e){
   e.preventDefault();
   var v=parseFloat($("#puffer").value);if(isNaN(v))return;
-  var st=Object.assign({},D.state||{});st.puffer={wert:v,geaendert:new Date().toISOString().slice(0,10),quelle:"manuell im Cockpit"};
   var btn=$("#puffer-save");btn.disabled=true;$("#puffer-msg").textContent="Speichert …";
-  var body={message:"Puffer "+v+" €",content:b64(JSON.stringify(st,null,1)),branch:"main"};
-  if(D.stateSha)body.sha=D.stateSha;
-  gh("state.json",{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)})
-  .then(function(r){
-    if(r.status===409||r.status===422){return getJSON("state.json").then(function(x){D.stateSha=x.sha;throw new Error("Datei wurde zwischenzeitlich geändert. Bitte noch einmal speichern.")})}
-    if(!r.ok)throw new Error(hint(r.status));
-    return r.json().then(function(j){D.stateSha=j.content.sha;D.state=st;$("#puffer-msg").textContent="Gespeichert";render()});
-  }).catch(function(e){$("#puffer-msg").textContent=e.message})
+  savePuffer(v,D.state,D.stateSha,false)
+  .then(function(){$("#puffer-msg").textContent="Gespeichert";render()})
+  .catch(function(e){$("#puffer-msg").textContent=e.message})
   .then(function(){btn.disabled=false});
 });
 
@@ -370,6 +384,39 @@ function checkVersion(){
   }).catch(function(){});
 }
 showVersion(null);checkVersion();
+/* ─── Diagnose (17.11.2026): Fehlerprotokoll (Erfassung in index.html), dauerhafter Speicher, Belegung ─── */
+var diagPersist=null,diagAll=false;
+function diagFmt(t){var d=new Date(t),p=function(n){return (n<10?"0":"")+n};return p(d.getDate())+"."+p(d.getMonth()+1)+". "+p(d.getHours())+":"+p(d.getMinutes())}
+function diagBytes(){var fc=0,tl=0;try{for(var i=0;i<localStorage.length;i++){var k=localStorage.key(i),n=(k.length+(localStorage.getItem(k)||"").length)*2;if(k.indexOf("fc-")===0)fc+=n;else if(k.indexOf("tl-")===0)tl+=n}}catch(e){}return {fc:fc,tl:tl}}
+function diagKB(b){return b<1024*900?Math.round(b/1024)+" KB":(Math.round(b/1048576*10)/10).toLocaleString("de-DE")+" MB"}
+function diagText(){return (window.fcDiag?fcDiag.read():[]).slice().reverse().map(function(e){return diagFmt(e.t)+"  "+e.m+(e.n>1?" (×"+e.n+")":"")+(e.s?"  ["+e.s+"]":"")}).join("\n")}
+function renderDiag(){
+  var box=$("#diag");if(!box)return;
+  var errs=(window.fcDiag?fcDiag.read():[]).slice().reverse(),ls=diagBytes();
+  box.querySelector("summary").textContent="Diagnose · Fehler: "+(errs.length?errs.length:"keine");
+  var show=diagAll?errs:errs.slice(0,3);
+  box.querySelector(".body").innerHTML='<dl class="kv">'+
+    '<dt>Speicher</dt><dd>'+(diagPersist===true?'<span style="color:var(--ok)">dauerhaft ✓</span>':diagPersist===false?'<span style="color:var(--warn)">nicht garantiert</span>':"–")+'</dd>'+
+    '<dt>Belegt</dt><dd>Cockpit '+diagKB(ls.fc)+' · Training Log '+diagKB(ls.tl)+'</dd>'+
+    '<dt>Fehler</dt><dd>'+(errs.length?errs.length+" · zuletzt "+diagFmt(errs[0].t):"keine")+'</dd></dl>'+
+    show.map(function(e){return '<div class="err-row"><b>'+esc(e.m)+(e.n>1?" (×"+e.n+")":"")+'</b>'+diagFmt(e.t)+(e.s?" · "+esc(e.s):"")+'</div>'}).join("")+
+    (errs.length?'<div class="row" style="margin-top:8px">'+(errs.length>3?'<button type="button" data-diag="all">'+(diagAll?"Weniger":"Alle "+errs.length)+'</button>':'')+
+      '<button type="button" data-diag="copy">Kopieren</button><button type="button" data-diag="clear">Leeren</button></div>':'');
+}
+document.addEventListener("click",function(e){
+  var b=e.target.closest&&e.target.closest("#diag button[data-diag]");if(!b)return;
+  var a=b.dataset.diag;
+  if(a==="all"){diagAll=!diagAll;renderDiag()}
+  else if(a==="clear"){if(window.fcDiag)fcDiag.clear();diagAll=false}
+  else if(a==="copy"){var t=diagText(),ok=function(){b.textContent="Kopiert ✓"};
+    if(navigator.clipboard&&navigator.clipboard.writeText)navigator.clipboard.writeText(t).then(ok,function(){fb(t);ok()});else{fb(t);ok()}}
+  function fb(t){var ta=document.createElement("textarea");ta.value=t;document.body.appendChild(ta);ta.select();try{document.execCommand("copy")}catch(x){}ta.remove()}
+});
+document.addEventListener("fc:err",renderDiag);
+renderDiag();
+/* Dauerhafter Speicher: gilt für die ganze Herkunft r1bozyme.github.io (training-log fragt ebenfalls) */
+if(navigator.storage&&navigator.storage.persisted)navigator.storage.persisted().then(function(v){
+  return v||!navigator.storage.persist?v:navigator.storage.persist()}).then(function(v){diagPersist=v;renderDiag()},function(){});
 /* ─── Reiter: immer nur ein Bereich sichtbar ─── */
 var TAB_KEY="fc-tab";
 function groupsAll(){return [].slice.call(document.querySelectorAll("#main .group"))}
@@ -402,6 +449,7 @@ function showTab(id,target,dir){
   var t=target&&document.getElementById(target);
   if(t){var d=t.querySelector("details.more");if(d)d.open=true}
   scrollNachWechsel(weg,t);
+  if(typeof backFollow==="function")backFollow();
 }
 document.addEventListener("click",function(e){
   var a=e.target.closest&&e.target.closest('a[href^="#"]');if(!a)return;
@@ -412,6 +460,47 @@ document.addEventListener("click",function(e){
 (function(){var h=location.hash.slice(1),saved=null;try{saved=localStorage.getItem(TAB_KEY)}catch(e){}
   var el=h&&document.getElementById(h),g=el&&(el.classList.contains("group")?el:el.closest(".group"));
   showTab(g?g.id:(saved||"g-status"),g&&g!==el?h:null)})();
+/* ─── Android-Zurück (17.11.2026, nach training-log back.js) ───
+   Jeder Reiter bekommt einen Verlaufseintrag {fcTab, i}; Zurück führt zum vorherigen Reiter, egal ob
+   per Reiterleiste, Status-Kachel oder Wischen dorthin gewechselt. Unterste Ebene ist „Status“, von dort
+   verlässt Zurück die App.
+   - Kein Endlos-Stapel: Liegt der Ziel-Reiter schon weiter unten im Verlauf, springt der Verlauf dorthin.
+   - „Verbindung“ (Formular) ist eine Ebene {fcLayer}: Zurück schließt nur das Formular.
+   - Erster Eintrag erst bei der ersten Berührung: Chrome überspringt Einträge ohne Nutzeraktion.
+   - scrollRestoration manual: sonst stellt der Browser nach scrollNachWechsel die alte Position her. */
+var ROOT_TAB="g-status",bStack=[ROOT_TAB],bIdx=0,bArmed=false,bWait=false,bFromPop=false,bLayer=false;
+try{history.scrollRestoration="manual"}catch(e){}
+history.replaceState({fcTab:ROOT_TAB,i:0},"");
+function hst(){return history.state||{}}
+function backFollow(){
+  if(!bArmed||bFromPop)return;
+  var s=hst();
+  if(s.fcLayer){                                   /* Ebene obenauf: erst abbauen, dann nachziehen */
+    if(bLayer){bLayer=false;showSetup(false,true)}
+    if(!bWait){bWait=true;history.back()}return;
+  }
+  if(bWait)return;
+  if(bStack[bIdx]===curTab)return;
+  var k=bStack.slice(0,bIdx).lastIndexOf(curTab);
+  if(k>=0){var d=k-bIdx;bIdx=k;bStack.length=k+1;bWait=true;history.go(d)}
+  else{bStack.length=bIdx+1;bStack.push(curTab);bIdx++;history.pushState({fcTab:curTab,i:bIdx},"")}
+}
+function backLayerOpen(){if(!bArmed||bLayer)return;bLayer=true;history.pushState({fcLayer:1},"")}
+function backLayerClose(){if(!bLayer)return;bLayer=false;if(hst().fcLayer){bWait=true;history.back()}}
+window.addEventListener("popstate",function(){
+  var s=hst();
+  if(bLayer&&!s.fcLayer){bLayer=false;showSetup(false,true)}   /* Zurück bei offenem Formular */
+  if(s.fcLayer){if(!bLayer)history.back();return}               /* verwaiste Ebene überspringen */
+  if(typeof s.i==="number")bIdx=s.i;
+  if(bWait){bWait=false;backFollow();return}
+  if(!s.fcTab||s.fcTab===curTab)return;
+  bFromPop=true;try{showTab(s.fcTab)}finally{bFromPop=false}
+});
+function bFirst(){
+  ["touchend","click","keydown"].forEach(function(t){document.removeEventListener(t,bFirst,true)});
+  bArmed=true;backFollow();
+}
+["touchend","click","keydown"].forEach(function(t){document.addEventListener(t,bFirst,true)});
 /* ─── Wischen wie unter Android: Seite folgt dem Finger, rastet ein oder federt zurück.
    Überall möglich, auch auf Diagrammen: Bewegt sich der Finger in den ersten 200 ms waagerecht,
    ist es ein Seitenwechsel. Bleibt er 200 ms ruhig, übernimmt das Diagramm (Gedrückthalten, scrub.js). ─── */

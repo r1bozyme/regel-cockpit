@@ -11,7 +11,7 @@
 <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0f1514">
 <meta name="robots" content="noindex">
 <!-- Bei JEDER Änderung an index.html hochzählen: Der Loader unten erkennt daran eine neue Fassung -->
-<meta name="app-build" content="2026-11-17 20:30">
+<meta name="app-build" content="2026-11-17 21:15">
 <title>Regel-Cockpit</title>
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icon.svg" type="image/svg+xml">
@@ -127,7 +127,40 @@ td{font-family:var(--f-data)}
 .setup label{display:grid;gap:4px;font-size:.82rem;color:var(--muted);font-weight:600}
 .setup input{width:100%}
 .setup p{margin:0;font-size:.85rem;color:var(--muted)}
+#diag{border-top:none;padding-top:0}
+#diag .err-row{font-size:.78rem;color:var(--muted);padding:6px 0;border-bottom:1px solid var(--line);word-break:break-word}
+#diag .err-row b{display:block;color:var(--ink);font-weight:600}
 </style>
+<script>
+/* ─── Fehlerprotokoll (17.11.2026, nach training-log diag.js) ───
+   Steht vor dem Modul-Loader, damit auch dessen Fehler und die aller Module erfasst werden:
+   window "error" (auch nicht geladene Dateien) und "unhandledrejection" landen in einem Ringpuffer
+   unter fc-err (max. 25, nur auf dem Gerät). Anzeige: „Diagnose“ ganz unten (cockpit.js). */
+(function(){
+  var KEY="fc-err",MAX=25;
+  function read(){try{var v=JSON.parse(localStorage.getItem(KEY));return Array.isArray(v)?v:[]}catch(e){return []}}
+  function add(e){
+    var a=read(),l=a[a.length-1];
+    if(l&&l.m===e.m&&l.s===e.s&&e.t-l.t<10000){l.n=(l.n||1)+1;l.t=e.t}else a.push(e);   /* gleicher Fehler binnen 10 s: zählen */
+    while(a.length>MAX)a.shift();
+    try{localStorage.setItem(KEY,JSON.stringify(a))}catch(x){}
+    try{document.dispatchEvent(new Event("fc:err"))}catch(x){}
+  }
+  function short(u){return String(u||"").split("?")[0].split("/").pop()}
+  window.addEventListener("error",function(ev){
+    var t=ev.target;
+    if(ev.message!==undefined||t===window)add({t:Date.now(),m:String(ev.message||"Fehler").slice(0,200),s:ev.filename?short(ev.filename)+":"+ev.lineno:""});
+    /* nur eigene Dateien: Google Fonts & Co. fehlen offline bei jedem Start und wären nur Rauschen */
+    else if(t&&(t.src||t.href)&&new URL(t.src||t.href,location.href).origin===location.origin)add({t:Date.now(),m:"Datei nicht geladen: "+short(t.src||t.href),s:(t.tagName||"").toLowerCase()});
+  },true);
+  window.addEventListener("unhandledrejection",function(ev){
+    var r=ev.reason,m=r&&r.message?r.message:String(r),st=r&&r.stack?String(r.stack).split("\n").slice(1,2).join("").trim():"";
+    add({t:Date.now(),m:("Promise: "+m).slice(0,200),s:st.slice(0,80)});
+  });
+  window.fcDiag={read:read,log:function(m,s){add({t:Date.now(),m:String(m).slice(0,200),s:s||""})},
+    clear:function(){try{localStorage.removeItem(KEY)}catch(e){}try{document.dispatchEvent(new Event("fc:err"))}catch(x){}}};
+})();
+</script>
 </head>
 <body>
 <div class="sbar" aria-hidden="true"></div>
@@ -205,6 +238,7 @@ td{font-family:var(--f-data)}
 
     <p class="foot" id="source-note"></p>
     <p class="foot" id="app-version"></p>
+    <details class="more foot" id="diag"><summary>Diagnose</summary><div class="body"></div></details>
   </div>
 </div>
 
