@@ -211,7 +211,7 @@ td{font-family:var(--f-data)}
 (function(){
 "use strict";
 var CFG_KEY="fc-sync", API="https://api.github.com";
-var BUILD="2026-11-05 08:00";
+var BUILD="2026-11-17 20:00";
 var $=function(s){return document.querySelector(s)};
 var D={rules:null,snap:null,weekly:null,state:null,stateSha:null,err:null};
 
@@ -581,7 +581,25 @@ showVersion(null);checkVersion();
 var TAB_KEY="fc-tab";
 function groupsAll(){return [].slice.call(document.querySelectorAll("#main .group"))}
 var curTab=null;
+/* Kopf („Regel-Cockpit") beim Ansichtswechsel: War er schon weggescrollt, bleibt er weg und die
+   neue Ansicht beginnt direkt unter der Reiterleiste. Gemessen wird VOR dem Umschalten – eine kürzere
+   Ansicht kappt die Scrollposition sonst schon vorher, und der Kopf ist im Status-Reiter höher als sonst. */
+function safeTop(){var s=document.querySelector(".sbar");return s?s.offsetHeight:0}
+function docTop(el){return el.getBoundingClientRect().top+window.scrollY}
+function kopfWeg(){
+  var h=document.querySelector(".wrap>header");if(!h||!h.offsetHeight)return false;
+  return window.scrollY+safeTop()>=docTop(h)+h.offsetHeight/2;   /* Faustregel: zur Hälfte draußen */
+}
+function scrollNachWechsel(weg,t){
+  var m=document.getElementById("main"),keep=weg&&m?Math.max(0,docTop(m)-safeTop()):0;
+  /* Zu kurze Ansichten bekommen unten Platz, damit der Kopf weg bleiben kann; sonst wieder entfernen */
+  document.body.style.minHeight=keep?(keep+window.innerHeight)+"px":"";
+  var y=keep;
+  if(t){var ty=docTop(t)-(parseFloat(getComputedStyle(t).scrollMarginTop)||0);y=Math.max(ty,keep)}
+  try{window.scrollTo({top:y,left:0,behavior:"instant"})}catch(e){window.scrollTo(0,y)}
+}
 function showTab(id,target,dir){
+  var weg=kopfWeg();
   var gs=groupsAll();if(!gs.some(function(g){return g.id===id}))id="g-status";
   gs.forEach(function(g){g.hidden=g.id!==id;g.classList.remove("in-l","in-r");if(g.id===id&&dir){void g.offsetWidth;g.classList.add(dir>0?"in-l":"in-r")}});
   curTab=id;document.body.classList.toggle("tab-status",id==="g-status");
@@ -589,7 +607,8 @@ function showTab(id,target,dir){
     if(on&&a.scrollIntoView)try{a.scrollIntoView({inline:"center",block:"nearest"})}catch(e){}});
   try{localStorage.setItem(TAB_KEY,id)}catch(e){}
   var t=target&&document.getElementById(target);
-  if(t){var d=t.querySelector("details.more");if(d)d.open=true;t.scrollIntoView({block:"start"})}else window.scrollTo(0,0);
+  if(t){var d=t.querySelector("details.more");if(d)d.open=true}
+  scrollNachWechsel(weg,t);
 }
 document.addEventListener("click",function(e){
   var a=e.target.closest&&e.target.closest('a[href^="#"]');if(!a)return;
