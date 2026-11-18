@@ -11,7 +11,7 @@
 <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0f1514">
 <meta name="robots" content="noindex">
 <!-- Bei JEDER Änderung an index.html hochzählen: Der Loader unten erkennt daran eine neue Fassung -->
-<meta name="app-build" content="2026-11-17 22:30">
+<meta name="app-build" content="2026-11-18 14:00">
 <title>Regel-Cockpit</title>
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icon.svg" type="image/svg+xml">
@@ -261,7 +261,7 @@ td{font-family:var(--f-data)}
       dann den Eintrag. Ohne Kopie (allererster Start) bleibt <script src> der Rückfall.
    Kein Service Worker, kein Cache-Manifest: Der HTTP-Cache ist die einzige Cache-Ebene. */
 (function(){
-  var MODS=["scrub.js","cockpit.js"],KEY="fc-mod:";
+  var MODS=["scrub.js","logik.js","cockpit.js"],KEY="fc-mod:";
   var build=(document.querySelector('meta[name="app-build"]')||{}).content||"";
   var done=false,texts={};
   /* Kopien gelten nur zusammen mit der index.html, mit der sie abgeglichen wurden (KEY+"build") */

@@ -14,39 +14,15 @@ function usd(v){return "$"+v.toLocaleString("de-DE",{minimumFractionDigits:2,max
 function pct(v,d){d=d==null?1:d;return (v*100).toLocaleString("de-DE",{minimumFractionDigits:d,maximumFractionDigits:d})+" %"}
 function esc(s){return String(s).replace(/[&<>"]/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]})}
 function dDE(iso){return new Date(iso+"T12:00:00").toLocaleDateString("de-DE")}
-/* Kalendertage bis zu einem Datum (Ortszeit): 0 = heute, 1 = morgen, <0 = vorbei.
-   Früher Math.ceil auf eine Uhrzeit – am Stichtag selbst stand dann „noch 1 Tag“, abends „-0“. */
-function calDays(iso){var a=new Date(),t=new Date(iso+"T00:00:00");a.setHours(0,0,0,0);return Math.round((t-a)/864e5)}
+/* Rechenlogik liegt seit 18.11.2026 in logik.js (window.fcLogik), damit tools/ dieselbe nutzen.
+   Die Funktionen hier sind dünne Hüllen um den globalen Zustand D. */
+var L=window.fcLogik;
+function calDays(iso){return L.calDays(iso)}
 function tageText(n){return n===0?"heute":n===1?"morgen":n<0?"vorbei":"noch "+n.toLocaleString("de-DE")+" Tage"}
-/* Z0 bewertet an EINER Stelle für Status-Kachel und Wochenschluss-Karte (vorher widersprachen sie sich).
-   Upside = WOCHENschluss (letzter NYSE-Handelstag der Woche) über der Schwelle, präzisiert am 17.11.2026:
-   ein einzelner Tagesschluss lässt Z0 nicht entfallen. Zählt nur VOR dem Termin und erst nach der
-   Festlegung von Z0 (rules.json: nio.stufe0.z0Festgelegt). */
-function z0Seit(){return D.rules.nio.stufe0.z0Festgelegt||"2026-11-04"}
-function z0Lage(){
-  var N=D.rules.nio,z0=N.stufe0.z0Datum,up=N.upsideUsd,w=(D.weekly&&D.weekly.nio)||[];
-  var hit=w.find(function(x){return x.closeUsd>up&&x.datum>z0Seit()&&(!z0||x.datum<z0)})||null;
-  return {z0:z0,up:up,hit:hit,tage:z0?calDays(z0):null};
-}
-/* Fehlende NIO-Wochenschlüsse: jede Woche (Mo–Fr) zwischen erstem Eintrag und der letzten fälligen Woche
-   braucht einen Eintrag. Fällig ist eine Woche ab Samstag 10 Uhr (Task läuft samstags 8:50). Ein Eintrag
-   an einem anderen Wochentag (Feiertag, z. B. Karfreitag) deckt seine Woche ab. */
-function fehlendeWochen(){
-  var w=(D.weekly&&D.weekly.nio)||[];if(!w.length)return [];
-  function mo(iso){var d=new Date(iso+"T12:00:00");d.setDate(d.getDate()-((d.getDay()+6)%7));return d}
-  function key(d){return d.getFullYear()+"-"+(d.getMonth()+1)+"-"+d.getDate()}
-  var have={};w.forEach(function(x){have[key(mo(x.datum))]=1});
-  var now=new Date(),last=new Date(now);last.setDate(now.getDate()-((now.getDay()+6)%7));last.setHours(12,0,0,0);
-  var sat10=new Date(last);sat10.setDate(last.getDate()+5);sat10.setHours(10,0,0,0);
-  if(now<sat10)last.setDate(last.getDate()-7);
-  var out=[];for(var d=mo(w[0].datum);d<=last;d.setDate(d.getDate()+7)){
-    if(!have[key(d)]){var f=new Date(d);f.setDate(d.getDate()+4);out.push(f.toLocaleDateString("de-DE"))}}
-  return out;
-}
-/* Erreichte Verkaufsstufen (Kurs in EUR ≥ Stufe). Ob schon verkauft wurde, kann das Cockpit nicht wissen –
-   es nennt den Bestand, damit man es sieht. */
+function z0Lage(){return L.z0Lage(D.rules,D.weekly)}
+function fehlendeWochen(){return L.fehlendeWochen(D.weekly).map(function(f){return f.toLocaleDateString("de-DE")})}
 function wochenText(fw){return fw.length>3?fw.length+" Wochen, zuletzt "+fw.slice(-3).join(", "):fw.join(", ")}
-function erreichteStufen(stufen,kursEur){return (stufen||[]).filter(function(t){return kursEur>=t.eur})}
+function erreichteStufen(stufen,kursEur){return L.erreichteStufen(stufen,kursEur)}
 
 /* ─── Konfiguration (Token nur lokal) ─── */
 function cfg(){try{return JSON.parse(localStorage.getItem(CFG_KEY))||{}}catch(e){return {}}}
@@ -138,49 +114,11 @@ $("#puffer-form").addEventListener("submit",function(e){
 });
 
 /* ─── Ableitungen ─── */
-function derive(){
-  var s=D.snap,R=D.rules;if(!s||!R)return null;
-  var pos=s.positionen||[];
-  var by=function(id){return pos.find(function(p){return p.id===id})};
-  var val=function(id){var p=by(id);return p?p.wertEur:0};
-  var total=pos.reduce(function(a,p){return a+(p.wertEur||0)},0);
-  var etf=R.etf.reduce(function(a,id){return a+val(id)},0);
-  var crypto=pos.filter(function(p){return p.typ==="crypto"||R.kryptoIsin.indexOf(p.id)>=0}).reduce(function(a,p){return a+p.wertEur},0);
-  var nio=by(R.nio.isin),baba=by(R.baba.isin),grab=by(R.grab.isin);
-  var nv=nio?nio.wertEur:0,bv=baba?baba.wertEur:0,gv=grab?grab.wertEur:0;
-  return {total:total,etf:etf,crypto:crypto,other:total-etf-nv-bv-gv-crypto,nio:nio,baba:baba,grab:grab,fx:s.fxUsdJeEur||1.13,
-    china:(nv+bv)/total,spec:(nv+bv+gv+crypto)/total};
-}
-function puffer(){return D.state&&D.state.puffer?D.state.puffer.wert:null}
-/* Tagesgeld (seit 17.11.2026 im Snapshot, aus Parqet „Tagesgeldkonto“); fehlt es, zählt es als 0 */
-function tagesgeld(){return D.snap&&typeof D.snap.tagesgeldEur==="number"?D.snap.tagesgeldEur:0}
-function stufe0(){
-  var w=(D.weekly&&D.weekly.nio)||[],t=D.rules.nio.stufe0.triggerUsd;
-  var last2=w.slice(-2);
-  return {weeks:w,both:last2.length===2&&last2.every(function(x){return x.closeUsd<t}),last:w[w.length-1]};
-}
-/* Soll-Sparrate eines Monats: Wert aus rules.sollSparrate; vor dem ersten Soll-Monat 0 (Umzugsmonat, kein Ziel),
-   nach dem letzten die volle Plan-Sparrate. */
-var MON=["Jan","Feb","Mär","Apr","Mai","Jun","Jul","Aug","Sep","Okt","Nov","Dez"];
-function monIdx(key){var p=key.split(" ");return (+p[1])*12+MON.indexOf(p[0])}
-function sollRate(y,m){
-  var S=D.rules.sollSparrate||{},z=D.rules.zielpfad,k=MON[m]+" "+y;if(S[k]!=null)return S[k];
-  var idx=Object.keys(S).map(monIdx).filter(function(v){return !isNaN(v)});if(!idx.length)return z.sparrate;
-  return y*12+m<Math.min.apply(null,idx)?0:z.sparrate;
-}
-/* „Basisfall heute“: Startwert mit Monatszins und den SOLL-Sparraten fortgeschrieben (17.11.2026). Vorher
-   pauschal 1.540 €/Mt ab Start – strenger als das eigene Soll (Sep kein Ziel, Okt–Mär 1.200 €), die
-   Abweichung sah dadurch um einige Tausend Euro schlechter aus. Das Zieldatum bleibt der kalibrierte
-   Basisfall mit voller Sparrate (simulate). */
-function expectedToday(){
-  var z=D.rules.zielpfad,r=z.rendite/12,sd=new Date(z.startDatum),n=Math.max(0,(Date.now()-sd)/(864e5*30.4375));
-  var v=z.startWert,full=Math.floor(n),frac=n-full,y=sd.getFullYear(),m=sd.getMonth();
-  for(var k=0;k<=full;k++){m++;if(m>11){m=0;y++}
-    var f=k<full?1:frac;v=v*Math.pow(1+r,f)+sollRate(y,m)*f}
-  return v;
-}
-
-/* ─── Darstellung ─── */
+function derive(){return L.derive(D.rules,D.snap)}
+function puffer(){return L.puffer(D.state)}
+function tagesgeld(){return L.tagesgeld(D.snap)}
+function stufe0(){return L.stufe0(D.rules,D.weekly)}
+function expectedToday(){return L.expectedToday(D.rules)}
 function chip(lbl,val,note,s,pill,href){return '<'+(href?'a href="'+href+'"':'div')+' class="chip" data-s="'+(s||"")+'"><span class="lbl">'+esc(lbl)+'</span><span class="val">'+val+'</span>'+(pill?"<span>"+pill+"</span>":"")+'<span class="note">'+note+'</span></'+(href?'a':'div')+'>'}
 function body(id){return document.querySelector(id+" .body")}
 
@@ -262,11 +200,7 @@ function renderAlloc(d){
   '<dt>Überhang über Grenze</dt><dd>'+(d.china>R.chinaAdrMax?eur((d.china-R.chinaAdrMax)*d.total):"keiner")+'</dd></dl>';
 }
 /* BABA-Nachkauf: TOR 3 (China-ADR) UND Liquiditätsregel – Einzelaktien-Zukäufe pausieren, solange der Puffer fehlt */
-function nachkauf(d){
-  var R=D.rules,p=puffer(),liq=p!=null&&p<R.liquiditaet.pufferMin,tor3=d.china>R.chinaAdrMax,g=[];
-  if(liq)g.push("Liquiditätsregel aktiv");if(tor3)g.push("TOR 3 rot");
-  return g.length?"gesperrt: "+g.join(", "):"TOR 3 grün, TOR 1/2 prüfen";
-}
+function nachkauf(d){var g=L.nachkaufSperren(D.rules,d,D.state);return g.length?"gesperrt: "+g.join(", "):"TOR 3 grün, TOR 1/2 prüfen"}
 function renderBaba(d){
   var el=body("#p-baba");if(!d||!d.baba){el.innerHTML='<div class="empty">Keine BABA-Position im Snapshot.</div>';return}
   var b=d.baba,R=D.rules,pts=R.baba.stufen.map(function(t){return {v:t.eur,l:t.name,c:"var(--muted)"}});
@@ -327,27 +261,9 @@ function renderGem(){
   '<div class="chart"><table><thead><tr><th>Monat</th><th>Alltag</th><th>Urlaub</th><th>Einrichtung</th></tr></thead><tbody>'+rows+'</tbody></table></div>'+
   '<p class="foot">'+(vorl?'<span class="pill warn">vorläufig</span> ':'')+'Alltag aus '+n+' Monat'+(n===1?'':'en')+(sonder.length?', ohne Sondermonat '+sonder.join(", "):'')+'. '+(vorl?'Ab 3 Monaten belastbar. ':'')+(ub&&g.urlaubHinweis?'Urlaub: '+esc(g.urlaubHinweis)+'. ':'')+'Einrichtung zählt nicht zum Bedarf.</p>';
 }
-/* Monatsweise Simulation bis zum Ziel: Wert * (1+r) + Sparrate */
-function simulate(v0,rate,start,goal,ret){
-  /* Wie im Tracker: Monatszins = Jahresrendite / 12, Monate bis zum Ziel auf ganze Monate gerundet */
-  var r=ret/12,v=v0,pv=v0,path=[{m:0,v:v}],n=0;
-  while(v<goal&&n<480){pv=v;v=v*(1+r)+rate;n++;path.push({m:n,v:v})}
-  var frac=n>0?(n-1)+(goal-pv)/(v-pv):0,m=Math.round(frac);
-  var dt=new Date(start.getFullYear(),start.getMonth()+m,1);
-  return {n:n,date:dt,path:path,start:start};
-}
+var simulate=L.simulate,monthsBetween=L.monthsBetween;
 function monthYear(dt){return dt.toLocaleDateString("de-DE",{month:"short",year:"numeric"})}
-function monthsBetween(a,b){return (b.getFullYear()-a.getFullYear())*12+(b.getMonth()-a.getMonth())}
-/* „So weiter wie bisher“: Ø des tatsächlich ANGELEGTEN Betrags der letzten 3 abgeschlossenen Monate
-   (17.11.2026, vorher Ø-Überschuss). Der Überschuss enthält keine Einmaleffekte (Einrichtung, Ablöse) und
-   überschätzt, was wirklich im Vermögen ankommt. Fehlt „investiert“, gilt ersatzweise der Überschuss. */
-function istRate(){
-  var rows=((D.snap&&D.snap.sparplan)||[]).filter(function(r){return r.ueberschuss!=null}).slice(-3);
-  if(!rows.length)return null;
-  var inv=rows.every(function(r){return r.investiert!=null});
-  return {rate:rows.reduce(function(a,r){return a+(inv?r.investiert:r.ueberschuss)},0)/rows.length,inv:inv,
-    label:rows.map(function(r){return r.monat.slice(0,3)}).join("–")};
-}
+function istRate(){return L.istRate(D.snap)}
 function pathChart(series,goal,start,end){
   var W=460,H=200,L=46,R=10,T=12,B=26;
   var span=Math.max(1,monthsBetween(start,end)),max=goal*1.08,min=Math.min.apply(null,series.map(function(s){return s.sim.path[0].v}))*0.9;
