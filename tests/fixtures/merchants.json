@@ -1,0 +1,22 @@
+{
+ "stand": "2026-01-01",
+ "hinweis": "Erfundene Testregeln für tests/smoke.py – keine echten Daten.",
+ "parameter": {"ordergebuehrSparplan": 1.5},
+ "regeln": [
+  {"muster": "gehalt", "behandlung": "einkommen"},
+  {"muster": "reisekosten", "behandlung": "sanofi-erstattung"},
+  {"muster": "depot 123 wertp", "behandlung": "etf"},
+  {"muster": "übertrag tagesgeld", "behandlung": "tagesgeld"},
+  {"muster": "kreditkartenabrechnung", "behandlung": "visa-sammel"},
+  {"muster": "streamdienst", "behandlung": "abo"},
+  {"muster": "hotel test", "behandlung": "sanofi"},
+  {"muster": "raststaette", "behandlung": "sanofi", "nurReisetag": true, "sonst": "konsum"},
+  {"muster": "moebelhaus", "behandlung": "einrichtung"},
+  {"muster": "vermieter", "behandlung": "fix-gemeinsam"},
+  {"muster": "zahldienst", "behandlung": "nachfragen"},
+  {"muster": "übertrag gemeinschaftskonto", "behandlung": "transfer"},
+  {"muster": "max und erika", "behandlung": "transfer"},
+  {"muster": "ausgleich karte", "behandlung": "transfer"}
+ ],
+ "reisetage": {"toleranzTage": 1}
+}
