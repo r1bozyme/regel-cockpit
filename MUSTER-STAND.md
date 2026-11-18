@@ -4,16 +4,19 @@ Die Fitness-App (r1bozyme/training-log) ist dem Cockpit oft einen Schritt
 voraus und schreibt übertragbare Lösungen nach `MUSTER.md`. Diese Datei hält
 fest, welcher Stand davon ausgewertet ist und was mit jedem Muster passiert ist.
 
-**Zuletzt ausgewertet:** training-log Commit `09c8f3c` (MUSTER.md vom 17.11.2026)
+**Zuletzt ausgewertet:** training-log Commit `1cd06bf` (MUSTER.md vom 18.11.2026)
 
 Neue oder geänderte Einträge finden:
-`git log --oneline 09c8f3c..origin/main -- MUSTER.md` bzw. `git diff 09c8f3c origin/main -- MUSTER.md`
+`git log --oneline 1cd06bf..origin/main -- MUSTER.md` bzw. `git diff 1cd06bf origin/main -- MUSTER.md`
 
 ## Status je Muster
 
 | Muster | Status im Cockpit |
 |---|---|
-| Sofort-Updates beim Start | übernommen 17.11. (3a43038), mit Verbesserungen, siehe unten |
+| Sofort-Updates beim Start | übernommen 17.11. (3a43038). training-log erkennt neue Fassungen inzwischen automatisch (force-cache gegen no-cache) statt über `app-build`: nicht nötig, der Smoke-Test prüft seit 18.11., dass `app-build` hochgezählt wird |
+| Testen von Cache-Verhalten | vorhanden (stammt aus dem Cockpit, `tests/loader_test.py`) |
+| Smoke-Test vor jedem Push | übernommen 18.11. (`tests/smoke.py`), erweitert um app-build, `logik.js` in Node und die Skripte in `tools/` |
+| CLAUDE.md nur mit Code-Regeln | übernommen 18.11. |
 | Kein Service Worker | gegeben, nie einer vorhanden |
 | Installierbare PWA (id, start_url, maskable) | vorhanden; Icons randlos, Motiv in Safe Zone (geprüft 17.11.) |
 | Ansichtswechsel als Ereignis | nicht nötig: nur `showTab`, kaum Zuhörer |
@@ -35,26 +38,18 @@ Neue oder geänderte Einträge finden:
 | Graphen per Gedrückthalten | vorhanden (scrub.js) |
 | Kontext-Chip im Kopf | nicht nötig |
 
-## Rückmeldungen an training-log (dort noch offen)
+## Rückmeldungen an training-log
 
-Aus dieser Sitzung kann nicht nach training-log geschrieben werden. Diese
-Verbesserungen sollten dort in Loader und MUSTER.md zurückfließen:
+Die vier Rückmeldungen vom 17.11. (Rückfall per `script.text`, neue index.html
+erkennen, HTTP/1.1-Testserver, 409 mit frischem Stand) sind in training-log
+umgesetzt und in MUSTER.md eingearbeitet (df012eb, geprüft 18.11.). Neu:
 
-1. **Rückfall hängt an der Cache-Sperre:** Hängt das Netz, wartet ein
-   `<script src>` in Chrome auf den laufenden `no-cache`-Abgleich derselben
-   Datei. Der 2,5-s-Rückfall greift dann erst nach dem Netz-Timeout. Abbrechen
-   per AbortController hilft nicht, Chrome verwirft dabei den Cache-Eintrag.
-   Lösung im Cockpit: den abgeglichenen Text selbst ausführen
-   (`script.text` + `//# sourceURL=`) und eine Kopie in localStorage halten;
-   der Rückfall nutzt die Kopie.
-2. **Alter Loader kennt neues Modul nicht:** Im Cockpit über eine
-   Build-Kennung `<meta name="app-build">` gelöst. Weicht die frisch geholte
-   index.html ab, wird einmal neu geladen (sessionStorage-Flag). Damit sind
-   neues Markup und neue Module sofort da, ohne Nachlade-Workarounds.
-3. **Testserver:** ETag-Abgleich funktioniert in Chrome nur mit HTTP/1.1-
-   Antworten; Pythons `SimpleHTTPRequestHandler` braucht dafür
-   `protocol_version = "HTTP/1.1"`. Inkognito-Kontexte von Playwright cachen
-   nicht, für Cache-Tests ein persistentes Profil nehmen.
-4. **409/422 beim Speichern:** frischen Stand holen und nur die eigene
-   Änderung darauf setzen statt blind mit neuer sha zu wiederholen, falls
-   auch dort andere Prozesse in dieselbe Datei schreiben.
+1. **Logik als eigenes Modul für App und Skripte:** Im Cockpit liegt die
+   Rechenlogik seit 18.11. in `app/logik.js` (ohne DOM, im Browser und in
+   Node). Die Skripte in `tools/` und der Smoke-Test nutzen dieselben
+   Funktionen, so rechnet ein Chat-Skript nie anders als die App. Könnte für
+   training-log passen (z. B. Zielberechnung aus tracker.js für die Auswertung
+   in training-log-data).
+2. **Smoke-Test prüft `app-build`:** Ist `app/index.html` gegenüber
+   `origin/main` geändert, die Kennung aber gleich, schlägt der Test fehl. In
+   training-log entfällt das (automatische Erkennung).
